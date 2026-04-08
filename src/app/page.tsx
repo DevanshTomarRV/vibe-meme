@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { getSupabase } from "@/lib/supabase";
 import RatingButton from "./components/RatingButton";
 import LoadingState from "./components/LoadingState";
 
@@ -36,28 +35,17 @@ export default function Home() {
       const res = await fetch("/api/evaluate-vibe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rating, explanation: explanation.trim() }),
+        body: JSON.stringify({
+          rating,
+          explanation: explanation.trim(),
+          userName: userName.trim(),
+        }),
       });
 
       const data: VibeResponse & { error?: string } = await res.json();
 
       if (!res.ok) {
         throw new Error(data.error || "Something went wrong");
-      }
-
-      const { error: dbError } = await getSupabase()
-        .from("sprint_submissions")
-        .insert({
-          user_name: userName.trim(),
-          rating,
-          explanation: explanation.trim(),
-          richness_score: data.richnessScore,
-          ai_comment: data.aiComment,
-          meme_url: data.memeUrl,
-        });
-
-      if (dbError) {
-        throw new Error(`Failed to save submission: ${dbError.message}`);
       }
 
       setAppState("success");
