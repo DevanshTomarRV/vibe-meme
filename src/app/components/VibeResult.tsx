@@ -3,16 +3,9 @@
 interface VibeResultProps {
   richnessScore: number;
   aiComment: string;
-  rating: number;
+  memeUrl: string;
+  onReset: () => void;
 }
-
-const VIDEO_MAP: Record<number, { url: string; title: string }> = {
-  1: { url: "https://www.youtube.com/embed/GPLJVitGsso?autoplay=1&mute=1", title: "Pooja, What is this behavior?" },
-  2: { url: "https://www.youtube.com/embed/-3_IuPMya6k?autoplay=1&mute=1", title: "I'm Tired Boss" },
-  3: { url: "https://www.youtube.com/embed/0oBx7Jg4m-o?autoplay=1&mute=1", title: "This Is Fine" },
-  4: { url: "https://www.youtube.com/embed/jxdTwLvECAA?autoplay=1&mute=1&start=80", title: "Pedro Pascal Laughing Then Crying" },
-  5: { url: "https://www.youtube.com/embed/ywgeloPNmxk?autoplay=1&mute=1", title: "Gopi Bahu Laptop Washing" },
-};
 
 function getScoreColor(score: number): string {
   if (score >= 80) return "text-green-400";
@@ -22,19 +15,45 @@ function getScoreColor(score: number): string {
 }
 
 function getScoreGlow(score: number): string {
-  if (score >= 80) return "drop-shadow-[0_0_15px_rgba(74,222,128,0.6)]";
-  if (score >= 60) return "drop-shadow-[0_0_15px_rgba(250,204,21,0.6)]";
-  if (score >= 40) return "drop-shadow-[0_0_15px_rgba(251,146,60,0.6)]";
-  return "drop-shadow-[0_0_15px_rgba(248,113,113,0.6)]";
+  if (score >= 80) return "drop-shadow-[0_0_20px_rgba(74,222,128,0.7)]";
+  if (score >= 60) return "drop-shadow-[0_0_20px_rgba(250,204,21,0.7)]";
+  if (score >= 40) return "drop-shadow-[0_0_20px_rgba(251,146,60,0.7)]";
+  return "drop-shadow-[0_0_20px_rgba(248,113,113,0.7)]";
 }
 
-export default function VibeResult({ richnessScore, aiComment, rating }: VibeResultProps) {
-  const video = VIDEO_MAP[rating];
+function getScoreNeonBorder(score: number): string {
+  if (score >= 80) return "shadow-[0_0_30px_rgba(74,222,128,0.25),inset_0_0_30px_rgba(74,222,128,0.05)]";
+  if (score >= 60) return "shadow-[0_0_30px_rgba(250,204,21,0.25),inset_0_0_30px_rgba(250,204,21,0.05)]";
+  if (score >= 40) return "shadow-[0_0_30px_rgba(251,146,60,0.25),inset_0_0_30px_rgba(251,146,60,0.05)]";
+  return "shadow-[0_0_30px_rgba(248,113,113,0.25),inset_0_0_30px_rgba(248,113,113,0.05)]";
+}
+
+function toEmbedUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "youtu.be") {
+      return `https://www.youtube.com/embed${parsed.pathname}?autoplay=1&mute=1`;
+    }
+    if (parsed.hostname.includes("youtube.com") && parsed.searchParams.has("v")) {
+      return `https://www.youtube.com/embed/${parsed.searchParams.get("v")}?autoplay=1&mute=1`;
+    }
+    if (parsed.pathname.includes("/embed/")) {
+      const sep = url.includes("?") ? "&" : "?";
+      return `${url}${sep}autoplay=1&mute=1`;
+    }
+  } catch {
+    // fall through
+  }
+  return url;
+}
+
+export default function VibeResult({ richnessScore, aiComment, memeUrl, onReset }: VibeResultProps) {
+  const embedSrc = toEmbedUrl(memeUrl);
 
   return (
     <div className="w-full max-w-2xl mx-auto mt-10 space-y-8 animate-[fadeIn_0.6s_ease-out]">
       {/* Score Card */}
-      <div className="glass-strong rounded-2xl p-8 text-center">
+      <div className={`glass-strong rounded-2xl p-8 text-center ${getScoreNeonBorder(richnessScore)}`}>
         <p className="text-sm uppercase tracking-widest text-cyan-300/80 mb-2 font-mono">
           Richness Verdict
         </p>
@@ -58,11 +77,10 @@ export default function VibeResult({ richnessScore, aiComment, rating }: VibeRes
         <p className="text-sm uppercase tracking-widest text-cyan-300/80 mb-4 font-mono text-center">
           Your Sprint Anthem
         </p>
-        <p className="text-center text-white/60 text-sm mb-4">{video.title}</p>
         <div className="relative rounded-xl overflow-hidden neon-border-cyan border-2">
           <iframe
-            src={video.url}
-            title={video.title}
+            src={embedSrc}
+            title="Your Meme Vibe"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="w-full aspect-video"
@@ -70,13 +88,16 @@ export default function VibeResult({ richnessScore, aiComment, rating }: VibeRes
         </div>
       </div>
 
-      {/* Reset */}
+      {/* Submit Another */}
       <div className="text-center">
         <button
-          onClick={() => window.location.reload()}
-          className="text-sm text-white/40 hover:text-white/80 transition-colors font-mono cursor-pointer underline underline-offset-4"
+          onClick={onReset}
+          className="px-8 py-4 rounded-xl font-mono font-bold text-base uppercase tracking-widest
+            bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400
+            text-white shadow-[0_0_30px_rgba(120,80,255,0.3)] hover:shadow-[0_0_40px_rgba(120,80,255,0.5)]
+            transition-all duration-300 active:scale-[0.98] cursor-pointer"
         >
-          ↺ Start Over
+          Submit Another Vibe
         </button>
       </div>
     </div>

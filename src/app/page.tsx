@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import RatingButton from "./components/RatingButton";
 import LoadingState from "./components/LoadingState";
+import VibeResult from "./components/VibeResult";
 
 interface VibeResponse {
   richnessScore: number;
@@ -10,7 +11,7 @@ interface VibeResponse {
   memeUrl: string;
 }
 
-type AppState = "login" | "form" | "loading" | "success" | "error";
+type AppState = "login" | "form" | "loading" | "result" | "error";
 
 export default function Home() {
   const [userName, setUserName] = useState("");
@@ -18,6 +19,7 @@ export default function Home() {
   const [explanation, setExplanation] = useState("");
   const [appState, setAppState] = useState<AppState>("login");
   const [error, setError] = useState<string | null>(null);
+  const [vibeResult, setVibeResult] = useState<VibeResponse | null>(null);
 
   const handleLogin = useCallback(() => {
     if (userName.trim().length > 0) {
@@ -48,7 +50,8 @@ export default function Home() {
         throw new Error(data.error || "Something went wrong");
       }
 
-      setAppState("success");
+      setVibeResult(data);
+      setAppState("result");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message);
@@ -60,6 +63,7 @@ export default function Home() {
     setRating(null);
     setExplanation("");
     setError(null);
+    setVibeResult(null);
     setAppState("form");
   };
 
@@ -186,26 +190,14 @@ export default function Home() {
       {/* Loading State */}
       {appState === "loading" && <LoadingState />}
 
-      {/* Success State */}
-      {appState === "success" && (
-        <div className="w-full max-w-lg mx-auto mt-10 animate-fadeIn">
-          <div className="glass-strong rounded-2xl p-10 text-center">
-            <div className="text-6xl mb-6">✅</div>
-            <p className="text-2xl font-bold font-mono neon-text-cyan mb-3">
-              Vibe Submitted!
-            </p>
-            <p className="text-white/50 font-mono text-sm leading-relaxed mb-8">
-              Your retro has been beamed to the mothership.
-              <br />
-              <span className="text-purple-300">Look at the main screen</span> to see your meme play live.
-            </p>
-            <div className="glass rounded-xl p-4 inline-block">
-              <p className="text-xs text-white/30 font-mono uppercase tracking-widest">
-                Waiting for Admin to reveal...
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* Result State */}
+      {appState === "result" && vibeResult && (
+        <VibeResult
+          richnessScore={vibeResult.richnessScore}
+          aiComment={vibeResult.aiComment}
+          memeUrl={vibeResult.memeUrl}
+          onReset={handleReset}
+        />
       )}
 
       {/* Error State */}
