@@ -1,4 +1,4 @@
-# Meme Jukebox
+# Meme Vibe
 
 **A multiplayer sprint retrospective tool where AI judges your vibes and rewards you with semantically matched memes.**
 
@@ -6,7 +6,7 @@
 
 ## What Is This?
 
-Meme Jukebox turns boring sprint retros into an interactive party game. Team members submit their sprint ratings from their phones, an AI "Bouncer" roasts (or hypes) their responses, and a **vector similarity search** finds the perfect meme based on what they actually wrote — not just their number rating. The admin screen plays the matched meme video live, on the big screen.
+Meme Vibe turns boring sprint retros into an interactive party game. Team members submit their sprint ratings from their phones, an AI "Bouncer" roasts (or hypes) their responses, and a **vector similarity search** finds the perfect meme based on what they actually wrote — not just their number rating. The admin screen plays the matched meme video live, on the big screen.
 
 ### How It Works
 

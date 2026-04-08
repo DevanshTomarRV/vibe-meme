@@ -71,7 +71,7 @@ export default function Home() {
       <header className="text-center mb-12 animate-float">
         <h1 className="text-4xl sm:text-6xl font-bold tracking-tight mb-3">
           <span className="neon-text-purple">Meme</span>{" "}
-          <span className="neon-text-cyan">Jukebox</span>
+          <span className="neon-text-cyan">Vibe</span>
         </h1>
         <p className="text-sm sm:text-base text-white/50 font-mono tracking-widest uppercase">
           Sprint Retrospective — Multiplayer
@@ -227,7 +227,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="mt-16 text-center text-xs text-white/20 font-mono">
-        <p>Meme Jukebox v0.2 — Multiplayer Edition</p>
+        <p>Meme Vibe v0.2 — Multiplayer Edition</p>
       </footer>
     </main>
   );

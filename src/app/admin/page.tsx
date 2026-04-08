@@ -216,7 +216,7 @@ export default function AdminDashboard() {
 
       {/* Footer */}
       <footer className="mt-16 text-center text-xs text-white/20 font-mono">
-        <p>Meme Jukebox Admin v0.2 — Screen-Share Party Mode</p>
+        <p>Meme Vibe Admin v0.2 — Screen-Share Party Mode</p>
       </footer>
     </main>
   );

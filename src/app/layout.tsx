@@ -14,7 +14,7 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Meme Jukebox | Sprint Retrospective",
+  title: "Meme Vibe | Sprint Retrospective",
   description: "Greek Space Opera meets New Age Meme Culture — your team retro, but make it epic.",
 };
 
