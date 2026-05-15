@@ -8,9 +8,13 @@ interface VibeRequest {
   userName: string;
 }
 
-interface VibeResult {
+interface GradeFlags {
   richnessScore: number;
-  aiComment: string;
+  /** Thin / smug / dismissive lazy retro—server picks random Anupama vs Uta; bouncer line is generated after the clip is known. */
+  thinLazyRetro: boolean;
+  extremeBrainrot: boolean;
+  nonsenseSlop: boolean;
+  poorEnglish: boolean;
 }
 
 interface MemeMatch {
@@ -21,10 +25,135 @@ interface MemeMatch {
   similarity: number;
 }
 
+/**
+ * How much user sprint rating vs meme `base_rating` can nudge ordering.
+ * Kept small so a clearly better semantic match almost always wins.
+ */
+const RATING_TIEBREAK_WEIGHT = 0.022;
+
+/** When the bouncer flags word-slop (not any language), always play this clip (bypass vector match). */
+const WORD_SLOP_MEME_URL = "https://www.youtube.com/embed/Rt82LroisVA?autoplay=1&mute=1";
+
+const WORD_SLOP_CLIP = {
+  url: WORD_SLOP_MEME_URL,
+  title: "Word slop / gibberish (not a language)",
+  vibe: "Baffled comedic disbelief—someone submitted keyboard entropy instead of a retro. Roast gently; keep it generic (no named politicians).",
+} as const;
+
+const POOR_ENGLISH_CLIPS = [
+  {
+    url: "https://www.youtube.com/embed/s6rTyLNZxPE?autoplay=1&mute=1",
+    title: "Grammar / spelling roast",
+    vibe: "English-teacher meltdown energy—tell them clearly to improve spelling and grammar before the next retro; firm but not cruel.",
+  },
+  {
+    url: "https://www.youtube.com/embed/MwOH0gzG4wc?autoplay=1&mute=1",
+    title: "Poor English shame (alternate clip)",
+    vibe: "Same job as grammar roast—written English needs work; comedic shame, not bullying.",
+  },
+  {
+    url: "https://www.youtube.com/embed/OtCgV3UBii4?autoplay=1&mute=1",
+    title: "Poor English shame (variant)",
+    vibe: "Same job—typos and broken tense in a professional retro; push them to level up English.",
+  },
+] as const;
+
+const LAZY_LANE_CLIPS = [
+  {
+    url: "https://www.youtube.com/embed/eAmkg7TbkUc?autoplay=1&mute=1",
+    title: "Anupama — “Main marungi” (soap-opera rage)",
+    vibe: "Furious Indian TV mother / homework-not-done matriarch yelling—comedic theatrical rage, 'main marungi' exasperation—NEVER a credible threat of real violence. Loud and angry, not playful teasing.",
+  },
+  {
+    url: "https://www.youtube.com/embed/LvUIySl7Xi4?autoplay=1&mute=1",
+    title: "Uta aitha? (playful callout)",
+    vibe: "Playful mischievous teasing—someone clearly phoned it in—light cheeky roast. NOT soap-opera matriarch rage.",
+  },
+] as const;
+
+function pickClipAvoidingRecent<T extends { url: string }>(
+  clips: readonly T[],
+  recentMemeUrls: Set<string>,
+): T {
+  const shuffled = [...clips].sort(() => Math.random() - 0.5);
+  return shuffled.find((c) => !recentMemeUrls.has(c.url)) ?? shuffled[0];
+}
+
 /** Do not suggest a meme whose URL appears in the last N saved submissions. */
 const RECENT_MEME_EXCLUSION_COUNT = 2;
 /** Ask RPC for enough rows to find a good alternative after exclusions. */
 const MEME_MATCH_CANDIDATE_POOL = 40;
+/** Self-rated 5/5 plus at least this richness nudges toward peak-swagger “ehh boy” tier (above cute-good band). */
+const LEGENDARY_RATING_MEME_MIN_RICHNESS = 60;
+/** With rating 4–5 and richness at least this (and not in the legendary tier above), nudge toward wholesome “cute / all good” memes. */
+const CUTE_GOOD_VIBES_MIN_RICHNESS = 40;
+
+interface BouncerFlagSnapshot {
+  nonsenseSlop: boolean;
+  poorEnglish: boolean;
+  extremeBrainrot: boolean;
+}
+
+async function generateAiCommentForMeme(
+  model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>,
+  params: {
+    rating: number;
+    explanation: string;
+    memeTitle: string;
+    memeVibe: string;
+    flags: BouncerFlagSnapshot;
+  },
+): Promise<string> {
+  const { rating, explanation, memeTitle, memeVibe, flags } = params;
+  const extras: string[] = [];
+  if (flags.nonsenseSlop) {
+    extras.push(
+      "Their text is not coherent natural language—baffled comedic roast; keep it generic (no named politicians or rally clips).",
+    );
+  }
+  if (flags.poorEnglish) {
+    extras.push(
+      "They were flagged for poor English—you MUST ask them to improve spelling and grammar before the next retro; direct but not cruel.",
+    );
+  }
+  if (flags.extremeBrainrot) {
+    extras.push(
+      "Their write-up flagged chronically-online brainrot: aiComment MUST include this exact sentence somewhere: you are the poster child of 'Brainrot'. (verbatim, including single quotes around Brainrot).",
+    );
+  }
+
+  const prompt = `You are the AI Bouncer at a sprint retro party. The room will play ONE meme clip, then show your line on screen—your tone must match that clip, not a different meme's energy.
+
+Sprint self-rating: ${rating}/5
+Engineer's explanation: ${JSON.stringify(explanation)}
+
+Meme clip title: ${memeTitle}
+How this clip feels (your voice MUST match this—same emotional register as the video):
+${memeVibe}
+
+${extras.length > 0 ? `Additional rules:\n${extras.join("\n")}\n` : ""}
+General rules:
+- One or two short sentences in JSON field aiComment only.
+- If the clip vibe is angry matriarch soap rage, be loud and theatrical (still comedic safe—no credible threat of real violence). If the vibe is playful teasing, stay light and mischievous—not the angry matriarch voice.
+- Do not name Mamata Banerjee or other specific politician rally memes unless the clip title/vibe above already implies that genre.
+
+Return a JSON object with exactly this key: { "aiComment": string }`;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  if (!text) {
+    throw new Error("Empty bouncer comment response");
+  }
+  const cleaned = text
+    .replace(/```(?:json)?\s*/g, "")
+    .replace(/```\s*/g, "")
+    .trim();
+  const parsed = JSON.parse(cleaned) as { aiComment?: string };
+  if (typeof parsed.aiComment !== "string" || parsed.aiComment.trim().length === 0) {
+    throw new Error("Invalid bouncer comment JSON");
+  }
+  return parsed.aiComment.trim();
+}
 
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -85,46 +214,6 @@ export async function POST(request: NextRequest) {
   });
 
   try {
-    // ── Step 1: Grade the explanation with Gemini 2.5 Flash ─────────────────
-
-    const prompt = `You are an AI Bouncer evaluating an engineer's sprint retrospective. Grade their response out of 100 based on "richness" (how detailed and insightful it is, not just complaining). Also, extract a 1-sentence witty roast or hype-up based on their text.
-
-Return a JSON object with exactly these keys: { "richnessScore": number, "aiComment": string }
-
-Sprint Rating: ${rating}/5
-
-Explanation: ${explanation}`;
-
-    const gradeResult = await chatModel.generateContent(prompt);
-    const content = gradeResult.response.text();
-
-    if (!content) {
-      return NextResponse.json(
-        { error: "No response from AI. Try again." },
-        { status: 502 },
-      );
-    }
-
-    const cleaned = content
-      .replace(/```(?:json)?\s*/g, "")
-      .replace(/```\s*/g, "")
-      .trim();
-    const parsed: VibeResult = JSON.parse(cleaned);
-
-    if (typeof parsed.richnessScore !== "number" || typeof parsed.aiComment !== "string") {
-      return NextResponse.json(
-        { error: "Unexpected AI response format." },
-        { status: 502 },
-      );
-    }
-
-    // ── Step 2: Embed the user's explanation ────────────────────────────────
-
-    const embeddingResult = await embeddingModel.embedContent(explanation);
-    const userVector = embeddingResult.embedding.values.slice(0, 768);
-
-    // ── Step 3: Vector search for the best matching meme ────────────────────
-
     const supabase = getSupabase();
 
     const { data: recentRows, error: recentError } = await supabase
@@ -143,40 +232,203 @@ Explanation: ${explanation}`;
         .filter((url): url is string => typeof url === "string" && url.length > 0),
     );
 
-    const { data: matches, error: rpcError } = await supabase.rpc("match_memes", {
-      query_embedding: JSON.stringify(userVector),
-      match_threshold: 0.1,
-      match_count: MEME_MATCH_CANDIDATE_POOL,
-    });
+    // ── Step 1: Grade only (no aiComment—the clip is chosen first, then the line matches it) ─
 
-    if (rpcError) {
-      console.error("match_memes RPC error:", rpcError.message);
+    const gradePrompt = `You are an AI Bouncer evaluating an engineer's sprint retrospective. Grade richness only (no aiComment in this step).
+
+Set nonsenseSlop to true if the explanation is not coherent natural language at all—pure keyboard mash, random symbol soup, meaningless token salad, emoji spam with no sentences, or so broken that it is not really words in any language (not merely bad English—there must be no decipherable linguistic content). If nonsenseSlop is true: set poorEnglish to false, set thinLazyRetro to false, set extremeBrainrot to false, and richnessScore should be extremely low (0–20). Otherwise nonsenseSlop is false.
+
+Set poorEnglish to true only if nonsenseSlop is false AND the explanation has frequent spelling mistakes, obvious grammar errors, broken sentence structure, or chat-slang so thick it reads unprofessional for a retro—be reasonably strict. If poorEnglish is true, set thinLazyRetro to false. Otherwise false.
+
+Set extremeBrainrot to true if nonsenseSlop is false AND poorEnglish is false AND the write-up is peak internet brainrot: meme-caption dialect, chronically online nonsense, TikTok-for-brains sprint recap, algorithm-sludge hype, or unserious stacked references where it still resembles language but is cultural sludge—not random keyboard gibberish (that is nonsenseSlop) and not mainly grammar mistakes (that is poorEnglish). If extremeBrainrot is true, set thinLazyRetro to false. Otherwise extremeBrainrot is false.
+
+Set thinLazyRetro to true only if nonsenseSlop is false AND poorEnglish is false AND extremeBrainrot is false AND the retro reads as insultingly thin, lazy, smug, dismissive, checked-out, or homework-not-done with almost no insight (richness usually below ~45). This flag means the app will randomly show one of two specific lazy-retro clips—do not try to predict which. If the write-up has real substance, thinLazyRetro must be false.
+
+Return a JSON object with exactly these keys: { "richnessScore": number, "nonsenseSlop": boolean, "poorEnglish": boolean, "extremeBrainrot": boolean, "thinLazyRetro": boolean }
+
+Sprint Rating: ${rating}/5
+
+Explanation (verbatim user text as a JSON string — do not echo it as raw JSON structure): ${JSON.stringify(explanation)}`;
+
+    const gradeResult = await chatModel.generateContent(gradePrompt);
+    const gradeText = gradeResult.response.text();
+
+    if (!gradeText) {
       return NextResponse.json(
-        { error: `Meme matching failed: ${rpcError.message}` },
+        { error: "No response from AI. Try again." },
         { status: 502 },
       );
     }
 
-    const memeResults = matches as MemeMatch[];
-    if (!memeResults || memeResults.length === 0) {
+    const gradeCleaned = gradeText
+      .replace(/```(?:json)?\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
+    let graded: GradeFlags;
+    try {
+      graded = JSON.parse(gradeCleaned) as GradeFlags;
+    } catch {
+      const retry = await chatModel.generateContent(
+        `${gradePrompt}\n\nIMPORTANT: Your previous reply was not valid JSON. Reply with ONE minified JSON object only—no markdown, no prose. Use lowercase true/false.`,
+      );
+      const retryText = retry.response.text();
+      if (!retryText) {
+        return NextResponse.json(
+          { error: "No response from AI. Try again." },
+          { status: 502 },
+        );
+      }
+      const retryClean = retryText
+        .replace(/```(?:json)?\s*/g, "")
+        .replace(/```\s*/g, "")
+        .trim();
+      graded = JSON.parse(retryClean) as GradeFlags;
+    }
+
+    if (typeof graded.richnessScore !== "number") {
       return NextResponse.json(
-        { error: "No matching meme found." },
+        { error: "Unexpected AI response format." },
         { status: 502 },
       );
     }
 
-    const bestMeme =
-      memeResults.find((m) => !recentMemeUrls.has(m.video_url)) ?? memeResults[0];
+    const nonsenseSlop = graded.nonsenseSlop === true;
+    const poorEnglish = !nonsenseSlop && graded.poorEnglish === true;
+    const extremeBrainrot =
+      !nonsenseSlop && !poorEnglish && graded.extremeBrainrot === true;
+    const thinLazyRetro =
+      !nonsenseSlop && !poorEnglish && !extremeBrainrot && graded.thinLazyRetro === true;
 
-    if (recentMemeUrls.has(bestMeme.video_url)) {
-      console.warn(
-        "Meme diversity: all RPC candidates were in the recent-exclusion set; using top similarity match.",
+    const flags: BouncerFlagSnapshot = { nonsenseSlop, poorEnglish, extremeBrainrot };
+
+    // ── Step 2: Pick meme URL + metadata for the bouncer to match ─────────────
+
+    let memeUrl: string;
+    let memeTitle: string;
+    let memeVibe: string;
+
+    if (nonsenseSlop) {
+      memeUrl = WORD_SLOP_CLIP.url;
+      memeTitle = WORD_SLOP_CLIP.title;
+      memeVibe = WORD_SLOP_CLIP.vibe;
+    } else if (poorEnglish) {
+      const clip = pickClipAvoidingRecent(POOR_ENGLISH_CLIPS, recentMemeUrls);
+      memeUrl = clip.url;
+      memeTitle = clip.title;
+      memeVibe = clip.vibe;
+    } else if (thinLazyRetro) {
+      const clip = pickClipAvoidingRecent(LAZY_LANE_CLIPS, recentMemeUrls);
+      memeUrl = clip.url;
+      memeTitle = clip.title;
+      memeVibe = clip.vibe;
+    } else {
+      const trimmedExplanation = explanation.trim();
+      let explanationForMemeEmbedding = trimmedExplanation;
+
+      if (extremeBrainrot) {
+        explanationForMemeEmbedding += `\n\n(Grading context: chronically online brainrot sprint recap—meme dialect, poster child of Brainrot energy, TikTok-caption brain, algorithm-sludge hype. Match to viral brainrot Short clips by semantic fit.)`;
+      } else if (
+        rating === 5 &&
+        graded.richnessScore >= LEGENDARY_RATING_MEME_MIN_RICHNESS
+      ) {
+        explanationForMemeEmbedding += `\n\n(They self-rated this sprint 5/5 legendary and the write-up reads like someone genuinely on top of their game—clear wins, momentum, crushing it with receipts, peak form, swagger that is earned.)`;
+      } else if (
+        (rating === 4 || rating === 5) &&
+        graded.richnessScore >= CUTE_GOOD_VIBES_MIN_RICHNESS
+      ) {
+        explanationForMemeEmbedding += `\n\n(They rated this sprint 4 or 5 with solid richness—warm wholesome "everything is good" cute retro energy, or if the text is a chaotic celebratory shout / unserious internet hype, still pick by semantic fit to the closest meme in the library without naming specific clips.)`;
+      } else if (rating === 4 || rating === 5) {
+        explanationForMemeEmbedding += `\n\n(Self-rated sprint 4 or 5; celebratory or internet-hype write-ups even with middling richness—pick the closest semantic meme match from the library.)`;
+      }
+
+      const embeddingResult = await embeddingModel.embedContent(explanationForMemeEmbedding);
+      const userVector = embeddingResult.embedding.values.slice(0, 768);
+
+      const { data: matches, error: rpcError } = await supabase.rpc("match_memes", {
+        query_embedding: JSON.stringify(userVector),
+        match_threshold: 0.1,
+        match_count: MEME_MATCH_CANDIDATE_POOL,
+      });
+
+      if (rpcError) {
+        console.error("match_memes RPC error:", rpcError.message);
+        return NextResponse.json(
+          { error: `Meme matching failed: ${rpcError.message}` },
+          { status: 502 },
+        );
+      }
+
+      const memeResults = matches as MemeMatch[];
+      if (!memeResults || memeResults.length === 0) {
+        return NextResponse.json(
+          { error: "No matching meme found." },
+          { status: 502 },
+        );
+      }
+
+      const ids = memeResults.map((m) => m.id).filter((id): id is string => Boolean(id));
+      const baseRatingById = new Map<string, number>();
+      if (ids.length > 0) {
+        const { data: metaRows, error: metaErr } = await supabase
+          .from("meme_contexts")
+          .select("id, base_rating")
+          .in("id", ids);
+        if (metaErr) {
+          console.error("meme_contexts meta fetch error:", metaErr.message);
+        }
+        for (const row of metaRows ?? []) {
+          if (row.id != null && typeof row.base_rating === "number") {
+            baseRatingById.set(String(row.id), row.base_rating);
+          }
+        }
+      }
+
+      const ranked = [...memeResults].sort((a, b) => {
+        const brA = baseRatingById.get(a.id) ?? 3;
+        const brB = baseRatingById.get(b.id) ?? 3;
+        const alignA = 1 - Math.min(4, Math.abs(rating - brA)) / 4;
+        const alignB = 1 - Math.min(4, Math.abs(rating - brB)) / 4;
+        const scoreA = a.similarity + RATING_TIEBREAK_WEIGHT * alignA;
+        const scoreB = b.similarity + RATING_TIEBREAK_WEIGHT * alignB;
+        return scoreB - scoreA;
+      });
+
+      const bestMeme =
+        ranked.find((m) => !recentMemeUrls.has(m.video_url)) ?? ranked[0];
+
+      if (recentMemeUrls.has(bestMeme.video_url)) {
+        console.warn(
+          "Meme diversity: all RPC candidates were in the recent-exclusion set; using top similarity match.",
+        );
+      }
+
+      memeUrl = bestMeme.video_url;
+      memeTitle = bestMeme.title ?? "Matched meme";
+      const ctx = bestMeme.semantic_context ?? "";
+      memeVibe = ctx.length > 500 ? `${ctx.slice(0, 500)}…` : ctx;
+    }
+
+    // ── Step 3: Bouncer line matched to the clip actually shown ───────────────
+
+    let aiComment: string;
+    try {
+      aiComment = await generateAiCommentForMeme(chatModel, {
+        rating,
+        explanation: explanation.trim(),
+        memeTitle,
+        memeVibe,
+        flags,
+      });
+    } catch (e) {
+      console.error("Bouncer comment generation failed:", e);
+      return NextResponse.json(
+        { error: "AI bouncer comment failed. Try again." },
+        { status: 502 },
       );
     }
 
-    const memeUrl = bestMeme.video_url;
-
-    // ── Step 4: Save submission to sprint_submissions ───────────────────────
+    // ── Step 4: Save submission ───────────────────────────────────────────────
 
     const { data: insertedRow, error: insertError } = await supabase
       .from("sprint_submissions")
@@ -184,8 +436,8 @@ Explanation: ${explanation}`;
         user_name: userName.trim(),
         rating,
         explanation: explanation.trim(),
-        richness_score: parsed.richnessScore,
-        ai_comment: parsed.aiComment,
+        richness_score: graded.richnessScore,
+        ai_comment: aiComment,
         meme_url: memeUrl,
       })
       .select("id")
@@ -203,8 +455,8 @@ Explanation: ${explanation}`;
 
     return NextResponse.json({
       submissionId: insertedRow.id,
-      richnessScore: parsed.richnessScore,
-      aiComment: parsed.aiComment,
+      richnessScore: graded.richnessScore,
+      aiComment,
       memeUrl,
     });
   } catch (err: unknown) {
