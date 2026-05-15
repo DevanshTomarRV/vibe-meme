@@ -111,6 +111,28 @@ create table sprint_submissions (
   created_at timestamptz default now()
 );
 
+-- One feedback row per submission (relatable? + optional "how")
+create table meme_feedback (
+  id uuid default gen_random_uuid() primary key,
+  submission_id uuid not null references sprint_submissions(id) on delete cascade,
+  relatable boolean not null,
+  relatable_how text,
+  created_at timestamptz default now(),
+  unique (submission_id)
+);
+
+create index idx_meme_feedback_submission on meme_feedback(submission_id);
+
+alter table meme_feedback enable row level security;
+
+create policy "Public insert meme feedback"
+  on meme_feedback for insert
+  with check (true);
+
+create policy "Public read meme feedback"
+  on meme_feedback for select
+  using (true);
+
 -- Similarity search function
 create or replace function match_memes (
   query_embedding vector(768),
@@ -138,6 +160,8 @@ as $$
   limit match_count;
 $$;
 ```
+
+If your database was created from an older version of this README (without `meme_feedback`), run only the `meme_feedback` block above in the Supabase SQL Editor—the `create table` through the two `create policy` statements.
 
 ### 3. Configure Environment
 

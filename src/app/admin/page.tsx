@@ -3,6 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { getSupabase } from "@/lib/supabase";
 
+interface MemeFeedbackRow {
+  relatable: boolean;
+  relatable_how: string | null;
+}
+
 interface Submission {
   id: string;
   user_name: string;
@@ -12,6 +17,7 @@ interface Submission {
   ai_comment: string;
   meme_url: string;
   created_at: string;
+  meme_feedback: MemeFeedbackRow[] | null;
 }
 
 interface MemeForm {
@@ -78,7 +84,7 @@ export default function AdminDashboard() {
 
     const { data, error: fetchError } = await getSupabase()
       .from("sprint_submissions")
-      .select("*")
+      .select("*, meme_feedback ( relatable, relatable_how )")
       .order("created_at", { ascending: false });
 
     if (fetchError) {
@@ -407,6 +413,34 @@ export default function AdminDashboard() {
                           &ldquo;{sub.ai_comment}&rdquo;
                         </p>
                       </div>
+
+                      {/* Meme relatability (player feedback) */}
+                      {sub.meme_feedback && sub.meme_feedback.length > 0 && (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-amber-300/70 font-mono mb-2">
+                            Meme relatability
+                          </p>
+                          {sub.meme_feedback.map((fb) => (
+                            <div
+                              key={`${sub.id}-fb`}
+                              className="text-sm font-mono bg-white/5 rounded-lg p-4 space-y-2 border border-amber-500/15"
+                            >
+                              <p className="text-white/90">
+                                Relatable:{" "}
+                                <span className={fb.relatable ? "text-green-400" : "text-orange-300/90"}>
+                                  {fb.relatable ? "Yes" : "No"}
+                                </span>
+                              </p>
+                              {fb.relatable && fb.relatable_how && (
+                                <p className="text-white/70 leading-relaxed">
+                                  <span className="text-white/40">How: </span>
+                                  {fb.relatable_how}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Video / GIF */}
                       <div>

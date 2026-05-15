@@ -6,6 +6,7 @@ import LoadingState from "./components/LoadingState";
 import VibeResult from "./components/VibeResult";
 
 interface VibeResponse {
+  submissionId: string;
   richnessScore: number;
   aiComment: string;
   memeUrl: string;
@@ -193,6 +194,7 @@ export default function Home() {
       {/* Result State */}
       {appState === "result" && vibeResult && (
         <VibeResult
+          submissionId={vibeResult.submissionId}
           richnessScore={vibeResult.richnessScore}
           aiComment={vibeResult.aiComment}
           memeUrl={vibeResult.memeUrl}

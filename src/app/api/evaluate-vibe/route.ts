@@ -22,7 +22,7 @@ interface MemeMatch {
 }
 
 /** Do not suggest a meme whose URL appears in the last N saved submissions. */
-const RECENT_MEME_EXCLUSION_COUNT = 6;
+const RECENT_MEME_EXCLUSION_COUNT = 2;
 /** Ask RPC for enough rows to find a good alternative after exclusions. */
 const MEME_MATCH_CANDIDATE_POOL = 40;
 
@@ -178,7 +178,7 @@ Explanation: ${explanation}`;
 
     // ── Step 4: Save submission to sprint_submissions ───────────────────────
 
-    const { error: insertError } = await supabase
+    const { data: insertedRow, error: insertError } = await supabase
       .from("sprint_submissions")
       .insert({
         user_name: userName.trim(),
@@ -187,7 +187,9 @@ Explanation: ${explanation}`;
         richness_score: parsed.richnessScore,
         ai_comment: parsed.aiComment,
         meme_url: memeUrl,
-      });
+      })
+      .select("id")
+      .single();
 
     if (insertError) {
       console.error("sprint_submissions insert error:", insertError.message);
@@ -200,6 +202,7 @@ Explanation: ${explanation}`;
     // ── Step 5: Return response ─────────────────────────────────────────────
 
     return NextResponse.json({
+      submissionId: insertedRow.id,
       richnessScore: parsed.richnessScore,
       aiComment: parsed.aiComment,
       memeUrl,

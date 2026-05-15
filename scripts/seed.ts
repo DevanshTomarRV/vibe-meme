@@ -243,6 +243,17 @@ const MEMES: MemeEntry[] = [
     semantic_context: "Ultimate god-complex and invincibility. Use this when a developer pushes an absolutely massive, critical update directly to production on a Friday evening, and it executes completely flawlessly with zero bugs.",
     rlhf_score: 0,
   },
+  // ── User-requested Short (starts ~0:34) ───────────────────────────────────────
+  {
+    id: "yt_short_4dflvz_01",
+    title: 'The Devil Wears Prada — Emily Blunt “hearing this / wanna hear this”',
+    base_rating: 3,
+    video_url: "https://www.youtube.com/embed/4dFlvzBkBlY?autoplay=1&mute=1&start=34",
+    cultural_tags: ["Global", "The Devil Wears Prada", "Meeting Humor", "Emily Blunt"],
+    semantic_context:
+      "The Devil Wears Prada meme: Emily Blunt deadpan with the glass—'I am hearing this, but I wanna hear this'—polite on the outside, dying inside. Use for the coworker who hijacks standup with a forty-five minute weekend story while everyone else is trapped nodding. One person will not stop talking; nobody can interrupt without seeming rude; the meeting should be five minutes but becomes a hostage situation. PM or teammate monologuing, endless personal tangent, verbal diarrhea in a daily standup, agile ceremony gone wrong, listening fatigue, please wrap it up energy.",
+    rlhf_score: 0,
+  },
 ];
 
 // ── Environment validation ────────────────────────────────────────────────────
