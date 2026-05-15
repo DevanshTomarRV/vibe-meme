@@ -21,6 +21,11 @@ interface MemeMatch {
   similarity: number;
 }
 
+/** Do not suggest a meme whose URL appears in the last N saved submissions. */
+const RECENT_MEME_EXCLUSION_COUNT = 6;
+/** Ask RPC for enough rows to find a good alternative after exclusions. */
+const MEME_MATCH_CANDIDATE_POOL = 40;
+
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -122,10 +127,26 @@ Explanation: ${explanation}`;
 
     const supabase = getSupabase();
 
+    const { data: recentRows, error: recentError } = await supabase
+      .from("sprint_submissions")
+      .select("meme_url")
+      .order("created_at", { ascending: false })
+      .limit(RECENT_MEME_EXCLUSION_COUNT);
+
+    if (recentError) {
+      console.error("recent submissions fetch error:", recentError.message);
+    }
+
+    const recentMemeUrls = new Set(
+      (recentRows ?? [])
+        .map((row) => row.meme_url)
+        .filter((url): url is string => typeof url === "string" && url.length > 0),
+    );
+
     const { data: matches, error: rpcError } = await supabase.rpc("match_memes", {
       query_embedding: JSON.stringify(userVector),
       match_threshold: 0.1,
-      match_count: 1,
+      match_count: MEME_MATCH_CANDIDATE_POOL,
     });
 
     if (rpcError) {
@@ -144,7 +165,15 @@ Explanation: ${explanation}`;
       );
     }
 
-    const bestMeme = memeResults[0];
+    const bestMeme =
+      memeResults.find((m) => !recentMemeUrls.has(m.video_url)) ?? memeResults[0];
+
+    if (recentMemeUrls.has(bestMeme.video_url)) {
+      console.warn(
+        "Meme diversity: all RPC candidates were in the recent-exclusion set; using top similarity match.",
+      );
+    }
+
     const memeUrl = bestMeme.video_url;
 
     // ── Step 4: Save submission to sprint_submissions ───────────────────────
