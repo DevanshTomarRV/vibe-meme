@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
 
 interface MemeFeedbackRow {
   relatable: boolean;
@@ -449,7 +450,7 @@ export default function AdminDashboard() {
                         </p>
                         <div className="relative rounded-xl overflow-hidden neon-border-cyan border-2">
                           <iframe
-                            src={sub.meme_url}
+                            src={normalizeYouTubePlaybackUrl(sub.meme_url)}
                             title={`Meme for ${sub.user_name}`}
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                             allowFullScreen

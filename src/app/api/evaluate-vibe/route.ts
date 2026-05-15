@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getSupabase } from "@/lib/supabase";
+import { canonicalMemeKey } from "@/lib/youtubeEmbed";
 
 interface VibeRequest {
   rating: number;
@@ -8,13 +9,11 @@ interface VibeRequest {
   userName: string;
 }
 
-interface GradeFlags {
+interface ModelGradeFlags {
   richnessScore: number;
-  /** Thin / smug / dismissive lazy retro—server picks random Anupama vs Uta; bouncer line is generated after the clip is known. */
-  thinLazyRetro: boolean;
-  extremeBrainrot: boolean;
   nonsenseSlop: boolean;
   poorEnglish: boolean;
+  extremeBrainrot: boolean;
 }
 
 interface MemeMatch {
@@ -31,28 +30,38 @@ interface MemeMatch {
  */
 const RATING_TIEBREAK_WEIGHT = 0.022;
 
-/** When the bouncer flags word-slop (not any language), always play this clip (bypass vector match). */
-const WORD_SLOP_MEME_URL = "https://www.youtube.com/embed/Rt82LroisVA?autoplay=1&mute=1";
-
-const WORD_SLOP_CLIP = {
-  url: WORD_SLOP_MEME_URL,
-  title: "Word slop / gibberish (not a language)",
-  vibe: "Baffled comedic disbelief—someone submitted keyboard entropy instead of a retro. Roast gently; keep it generic (no named politicians).",
-} as const;
+/** When the bouncer flags word-slop, pick from this pool (≥3 clips so last-2 exclusion is always satisfiable). */
+const WORD_SLOP_CLIPS = [
+  {
+    url: "https://www.youtube.com/embed/Rt82LroisVA?autoplay=1&mute=0",
+    title: "Word slop / gibberish (not a language)",
+    vibe: "Baffled comedic disbelief—someone submitted keyboard entropy instead of a retro. Roast gently; keep it generic (no named politicians).",
+  },
+  {
+    url: "https://www.youtube.com/embed/yS55oeuy-X0?autoplay=1&mute=0&start=3",
+    title: "Confused John Travolta",
+    vibe: "Complete disorientation—'what did I just read?' energy; comedic confusion that this was submitted as a retro.",
+  },
+  {
+    url: "https://www.youtube.com/embed/VqB1uoDTdKM?autoplay=1&mute=0",
+    title: "Hell Elmo",
+    vibe: "Chaotic unhinged acceptance of nonsense—darkly funny reaction to text that should not exist in a professional retro.",
+  },
+] as const;
 
 const POOR_ENGLISH_CLIPS = [
   {
-    url: "https://www.youtube.com/embed/s6rTyLNZxPE?autoplay=1&mute=1",
+    url: "https://www.youtube.com/embed/s6rTyLNZxPE?autoplay=1&mute=0",
     title: "Grammar / spelling roast",
     vibe: "English-teacher meltdown energy—tell them clearly to improve spelling and grammar before the next retro; firm but not cruel.",
   },
   {
-    url: "https://www.youtube.com/embed/MwOH0gzG4wc?autoplay=1&mute=1",
+    url: "https://www.youtube.com/embed/MwOH0gzG4wc?autoplay=1&mute=0",
     title: "Poor English shame (alternate clip)",
     vibe: "Same job as grammar roast—written English needs work; comedic shame, not bullying.",
   },
   {
-    url: "https://www.youtube.com/embed/OtCgV3UBii4?autoplay=1&mute=1",
+    url: "https://www.youtube.com/embed/OtCgV3UBii4?autoplay=1&mute=0",
     title: "Poor English shame (variant)",
     vibe: "Same job—typos and broken tense in a professional retro; push them to level up English.",
   },
@@ -60,29 +69,42 @@ const POOR_ENGLISH_CLIPS = [
 
 const LAZY_LANE_CLIPS = [
   {
-    url: "https://www.youtube.com/embed/eAmkg7TbkUc?autoplay=1&mute=1",
+    url: "https://www.youtube.com/embed/eAmkg7TbkUc?autoplay=1&mute=0",
     title: "Anupama — “Main marungi” (soap-opera rage)",
     vibe: "Furious Indian TV mother / homework-not-done matriarch yelling—comedic theatrical rage, 'main marungi' exasperation—NEVER a credible threat of real violence. Loud and angry, not playful teasing.",
   },
   {
-    url: "https://www.youtube.com/embed/LvUIySl7Xi4?autoplay=1&mute=1",
+    url: "https://www.youtube.com/embed/LvUIySl7Xi4?autoplay=1&mute=0",
     title: "Uta aitha? (playful callout)",
     vibe: "Playful mischievous teasing—someone clearly phoned it in—light cheeky roast. NOT soap-opera matriarch rage.",
   },
 ] as const;
 
-function pickClipAvoidingRecent<T extends { url: string }>(
+/** Anupama / Uta lazy lane only when the retro is ultra-short (word count, not model guess). */
+const LAZY_LANE_MAX_WORDS = 3;
+
+function retroWordCount(text: string): number {
+  return text.trim().split(/\s+/).filter((w) => w.length > 0).length;
+}
+
+function pickFromPoolAvoidingRecentKeys<T extends { url: string }>(
   clips: readonly T[],
-  recentMemeUrls: Set<string>,
+  recentKeys: Set<string>,
 ): T {
-  const shuffled = [...clips].sort(() => Math.random() - 0.5);
-  return shuffled.find((c) => !recentMemeUrls.has(c.url)) ?? shuffled[0];
+  const usable = clips.filter((c) => !recentKeys.has(canonicalMemeKey(c.url)));
+  if (usable.length > 0) {
+    return usable[Math.floor(Math.random() * usable.length)];
+  }
+  console.warn(
+    "meme-diversity: every clip in this fixed pool matches a recent submission key; repeating (pool exhausted vs last-2 rule).",
+  );
+  return clips[Math.floor(Math.random() * clips.length)];
 }
 
 /** Do not suggest a meme whose URL appears in the last N saved submissions. */
 const RECENT_MEME_EXCLUSION_COUNT = 2;
 /** Ask RPC for enough rows to find a good alternative after exclusions. */
-const MEME_MATCH_CANDIDATE_POOL = 40;
+const MEME_MATCH_CANDIDATE_POOL = 55;
 /** Self-rated 5/5 plus at least this richness nudges toward peak-swagger “ehh boy” tier (above cute-good band). */
 const LEGENDARY_RATING_MEME_MIN_RICHNESS = 60;
 /** With rating 4–5 and richness at least this (and not in the legendary tier above), nudge toward wholesome “cute / all good” memes. */
@@ -226,25 +248,24 @@ export async function POST(request: NextRequest) {
       console.error("recent submissions fetch error:", recentError.message);
     }
 
-    const recentMemeUrls = new Set(
+    const recentMemeKeys = new Set(
       (recentRows ?? [])
         .map((row) => row.meme_url)
-        .filter((url): url is string => typeof url === "string" && url.length > 0),
+        .filter((url): url is string => typeof url === "string" && url.length > 0)
+        .map(canonicalMemeKey),
     );
 
     // ── Step 1: Grade only (no aiComment—the clip is chosen first, then the line matches it) ─
 
     const gradePrompt = `You are an AI Bouncer evaluating an engineer's sprint retrospective. Grade richness only (no aiComment in this step).
 
-Set nonsenseSlop to true if the explanation is not coherent natural language at all—pure keyboard mash, random symbol soup, meaningless token salad, emoji spam with no sentences, or so broken that it is not really words in any language (not merely bad English—there must be no decipherable linguistic content). If nonsenseSlop is true: set poorEnglish to false, set thinLazyRetro to false, set extremeBrainrot to false, and richnessScore should be extremely low (0–20). Otherwise nonsenseSlop is false.
+Set nonsenseSlop to true if the explanation is not coherent natural language at all—pure keyboard mash, random symbol soup, meaningless token salad, emoji spam with no sentences, or so broken that it is not really words in any language (not merely bad English—there must be no decipherable linguistic content). If nonsenseSlop is true: set poorEnglish to false, set extremeBrainrot to false, and richnessScore should be extremely low (0–20). Otherwise nonsenseSlop is false.
 
-Set poorEnglish to true only if nonsenseSlop is false AND the explanation has frequent spelling mistakes, obvious grammar errors, broken sentence structure, or chat-slang so thick it reads unprofessional for a retro—be reasonably strict. If poorEnglish is true, set thinLazyRetro to false. Otherwise false.
+Set poorEnglish to true only if nonsenseSlop is false AND the explanation is hard to follow as English prose: many repeated spelling errors, mangled tense or word order throughout, or sentence fragments stacked so the reader has to guess the intent. Do NOT set poorEnglish for: a few typos, casual or chatty tone, light slang, non-native phrasing that is still clear, bullet fragments, or informal register. When in doubt, prefer false.
 
-Set extremeBrainrot to true if nonsenseSlop is false AND poorEnglish is false AND the write-up is peak internet brainrot: meme-caption dialect, chronically online nonsense, TikTok-for-brains sprint recap, algorithm-sludge hype, or unserious stacked references where it still resembles language but is cultural sludge—not random keyboard gibberish (that is nonsenseSlop) and not mainly grammar mistakes (that is poorEnglish). If extremeBrainrot is true, set thinLazyRetro to false. Otherwise extremeBrainrot is false.
+Set extremeBrainrot to true if nonsenseSlop is false AND poorEnglish is false AND the write-up is peak internet brainrot: meme-caption dialect, chronically online nonsense, TikTok-for-brains sprint recap, algorithm-sludge hype, or unserious stacked references where it still resembles language but is cultural sludge—not random keyboard gibberish (that is nonsenseSlop) and not mainly grammar mistakes (that is poorEnglish). Otherwise extremeBrainrot is false.
 
-Set thinLazyRetro to true only if nonsenseSlop is false AND poorEnglish is false AND extremeBrainrot is false AND the retro reads as insultingly thin, lazy, smug, dismissive, checked-out, or homework-not-done with almost no insight (richness usually below ~45). This flag means the app will randomly show one of two specific lazy-retro clips—do not try to predict which. If the write-up has real substance, thinLazyRetro must be false.
-
-Return a JSON object with exactly these keys: { "richnessScore": number, "nonsenseSlop": boolean, "poorEnglish": boolean, "extremeBrainrot": boolean, "thinLazyRetro": boolean }
+Return a JSON object with exactly these keys: { "richnessScore": number, "nonsenseSlop": boolean, "poorEnglish": boolean, "extremeBrainrot": boolean }
 
 Sprint Rating: ${rating}/5
 
@@ -265,9 +286,9 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
       .replace(/```\s*/g, "")
       .trim();
 
-    let graded: GradeFlags;
+    let graded: ModelGradeFlags;
     try {
-      graded = JSON.parse(gradeCleaned) as GradeFlags;
+      graded = JSON.parse(gradeCleaned) as ModelGradeFlags;
     } catch {
       const retry = await chatModel.generateContent(
         `${gradePrompt}\n\nIMPORTANT: Your previous reply was not valid JSON. Reply with ONE minified JSON object only—no markdown, no prose. Use lowercase true/false.`,
@@ -283,7 +304,7 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
         .replace(/```(?:json)?\s*/g, "")
         .replace(/```\s*/g, "")
         .trim();
-      graded = JSON.parse(retryClean) as GradeFlags;
+      graded = JSON.parse(retryClean) as ModelGradeFlags;
     }
 
     if (typeof graded.richnessScore !== "number") {
@@ -297,8 +318,13 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
     const poorEnglish = !nonsenseSlop && graded.poorEnglish === true;
     const extremeBrainrot =
       !nonsenseSlop && !poorEnglish && graded.extremeBrainrot === true;
+    const wc = retroWordCount(explanation);
     const thinLazyRetro =
-      !nonsenseSlop && !poorEnglish && !extremeBrainrot && graded.thinLazyRetro === true;
+      wc >= 1 &&
+      wc <= LAZY_LANE_MAX_WORDS &&
+      !nonsenseSlop &&
+      !poorEnglish &&
+      !extremeBrainrot;
 
     const flags: BouncerFlagSnapshot = { nonsenseSlop, poorEnglish, extremeBrainrot };
 
@@ -309,16 +335,17 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
     let memeVibe: string;
 
     if (nonsenseSlop) {
-      memeUrl = WORD_SLOP_CLIP.url;
-      memeTitle = WORD_SLOP_CLIP.title;
-      memeVibe = WORD_SLOP_CLIP.vibe;
+      const clip = pickFromPoolAvoidingRecentKeys(WORD_SLOP_CLIPS, recentMemeKeys);
+      memeUrl = clip.url;
+      memeTitle = clip.title;
+      memeVibe = clip.vibe;
     } else if (poorEnglish) {
-      const clip = pickClipAvoidingRecent(POOR_ENGLISH_CLIPS, recentMemeUrls);
+      const clip = pickFromPoolAvoidingRecentKeys(POOR_ENGLISH_CLIPS, recentMemeKeys);
       memeUrl = clip.url;
       memeTitle = clip.title;
       memeVibe = clip.vibe;
     } else if (thinLazyRetro) {
-      const clip = pickClipAvoidingRecent(LAZY_LANE_CLIPS, recentMemeUrls);
+      const clip = pickFromPoolAvoidingRecentKeys(LAZY_LANE_CLIPS, recentMemeKeys);
       memeUrl = clip.url;
       memeTitle = clip.title;
       memeVibe = clip.vibe;
@@ -395,11 +422,11 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
       });
 
       const bestMeme =
-        ranked.find((m) => !recentMemeUrls.has(m.video_url)) ?? ranked[0];
+        ranked.find((m) => !recentMemeKeys.has(canonicalMemeKey(m.video_url))) ?? ranked[0];
 
-      if (recentMemeUrls.has(bestMeme.video_url)) {
+      if (recentMemeKeys.has(canonicalMemeKey(bestMeme.video_url))) {
         console.warn(
-          "Meme diversity: all RPC candidates were in the recent-exclusion set; using top similarity match.",
+          "meme-diversity: all RPC candidates matched a recent submission key; using top similarity match.",
         );
       }
 

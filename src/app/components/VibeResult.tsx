@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
 
 interface VibeResultProps {
   submissionId: string;
@@ -31,25 +32,6 @@ function getScoreNeonBorder(score: number): string {
   return "shadow-[0_0_30px_rgba(248,113,113,0.25),inset_0_0_30px_rgba(248,113,113,0.05)]";
 }
 
-function toEmbedUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === "youtu.be") {
-      return `https://www.youtube.com/embed${parsed.pathname}?autoplay=1&mute=1`;
-    }
-    if (parsed.hostname.includes("youtube.com") && parsed.searchParams.has("v")) {
-      return `https://www.youtube.com/embed/${parsed.searchParams.get("v")}?autoplay=1&mute=1`;
-    }
-    if (parsed.pathname.includes("/embed/")) {
-      const sep = url.includes("?") ? "&" : "?";
-      return `${url}${sep}autoplay=1&mute=1`;
-    }
-  } catch {
-    // fall through
-  }
-  return url;
-}
-
 type FeedbackPhase = "open" | "submitting" | "done" | "skipped";
 
 export default function VibeResult({
@@ -59,7 +41,7 @@ export default function VibeResult({
   memeUrl,
   onReset,
 }: VibeResultProps) {
-  const embedSrc = toEmbedUrl(memeUrl);
+  const embedSrc = normalizeYouTubePlaybackUrl(memeUrl);
   const [relatable, setRelatable] = useState<boolean | null>(null);
   const [howText, setHowText] = useState("");
   const [phase, setPhase] = useState<FeedbackPhase>("open");
