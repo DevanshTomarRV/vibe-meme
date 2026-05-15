@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getSupabase } from "@/lib/supabase";
 import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
 
 interface MemeFeedbackRow {
@@ -83,18 +82,23 @@ export default function AdminDashboard() {
     setLoading(true);
     setError(null);
 
-    const { data, error: fetchError } = await getSupabase()
-      .from("sprint_submissions")
-      .select("*, meme_feedback ( relatable, relatable_how )")
-      .order("created_at", { ascending: false });
+    try {
+      const res = await fetch("/api/admin/submissions", { method: "GET" });
+      const payload: { submissions?: Submission[]; error?: string } = await res.json();
 
-    if (fetchError) {
-      setError(fetchError.message);
-    } else {
-      setSubmissions(data ?? []);
+      if (!res.ok) {
+        setError(payload.error || `Request failed (${res.status})`);
+        setSubmissions([]);
+      } else {
+        setSubmissions(payload.submissions ?? []);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Network error";
+      setError(message);
+      setSubmissions([]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }, []);
 
   useEffect(() => {
