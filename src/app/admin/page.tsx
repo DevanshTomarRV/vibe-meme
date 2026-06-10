@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
 
 interface MemeFeedbackRow {
@@ -68,41 +68,112 @@ function getScoreGlow(score: number): string {
   return "drop-shadow-[0_0_10px_rgba(248,113,113,0.5)]";
 }
 
+const POLL_INTERVAL_MS = 4000;
+/** Full sync picks up meme_feedback on older rows. */
+const FULL_SYNC_EVERY_N_POLLS = 8;
+
+function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submission[] {
+  const byId = new Map(existing.map((s) => [s.id, s]));
+  for (const row of incoming) {
+    byId.set(row.id, row);
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+}
+
+type FetchMode = "initial" | "full" | "incremental";
+
 export default function AdminDashboard() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const submissionsRef = useRef<Submission[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [memeForm, setMemeForm] = useState<MemeForm>(EMPTY_MEME_FORM);
   const [cmsLoading, setCmsLoading] = useState(false);
   const [cmsMessage, setCmsMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const fetchSubmissions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  submissionsRef.current = submissions;
+
+  const fetchSubmissions = useCallback(async (mode: FetchMode = "full") => {
+    const isInitial = mode === "initial";
+    const isIncremental = mode === "incremental";
+
+    if (isInitial) {
+      setInitialLoading(true);
+      setError(null);
+    } else {
+      setRefreshing(true);
+    }
 
     try {
-      const res = await fetch("/api/admin/submissions", { method: "GET" });
+      let url = "/api/admin/submissions";
+      if (isIncremental && submissionsRef.current.length > 0) {
+        const newest = submissionsRef.current.reduce(
+          (max, s) => (s.created_at > max ? s.created_at : max),
+          submissionsRef.current[0].created_at,
+        );
+        url += `?since=${encodeURIComponent(newest)}`;
+      }
+
+      const res = await fetch(url, { method: "GET" });
       const payload: { submissions?: Submission[]; error?: string } = await res.json();
 
       if (!res.ok) {
-        setError(payload.error || `Request failed (${res.status})`);
-        setSubmissions([]);
+        if (!isIncremental) {
+          setError(payload.error || `Request failed (${res.status})`);
+          if (isInitial) {
+            setSubmissions([]);
+          }
+        }
+        return;
+      }
+
+      const rows = payload.submissions ?? [];
+
+      if (isIncremental && submissionsRef.current.length > 0) {
+        if (rows.length > 0) {
+          setSubmissions((prev) => mergeSubmissions(prev, rows));
+        }
       } else {
-        setSubmissions(payload.submissions ?? []);
+        setSubmissions(rows);
+        setError(null);
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Network error";
-      setError(message);
-      setSubmissions([]);
+      if (!isIncremental) {
+        const message = e instanceof Error ? e.message : "Network error";
+        setError(message);
+        if (isInitial) {
+          setSubmissions([]);
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setInitialLoading(false);
+      }
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchSubmissions();
+    fetchSubmissions("initial");
+  }, [fetchSubmissions]);
+
+  useEffect(() => {
+    let pollCount = 0;
+    const timer = setInterval(() => {
+      pollCount += 1;
+      if (pollCount % FULL_SYNC_EVERY_N_POLLS === 0) {
+        fetchSubmissions("full");
+      } else {
+        fetchSubmissions("incremental");
+      }
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(timer);
   }, [fetchSubmissions]);
 
   const toggleExpand = (id: string) => {
@@ -319,19 +390,29 @@ export default function AdminDashboard() {
       <section className="w-full max-w-4xl">
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-6">
-          <p className="text-white/40 font-mono text-sm">
-            {submissions.length} submission{submissions.length !== 1 ? "s" : ""}
-          </p>
+          <div className="flex items-center gap-3 font-mono text-sm">
+            <p className="text-white/40">
+              {submissions.length} submission{submissions.length !== 1 ? "s" : ""}
+            </p>
+            <span className="flex items-center gap-1.5 text-green-400/70 text-xs uppercase tracking-widest">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              Live
+            </span>
+            {refreshing && (
+              <span className="text-cyan-400/50 text-xs animate-pulse">syncing…</span>
+            )}
+          </div>
           <button
-            onClick={fetchSubmissions}
-            className="px-4 py-2 rounded-lg glass text-white/60 hover:text-white/90 font-mono text-xs uppercase tracking-widest transition-all cursor-pointer hover:border-cyan-400/30"
+            onClick={() => fetchSubmissions("full")}
+            disabled={refreshing}
+            className="px-4 py-2 rounded-lg glass text-white/60 hover:text-white/90 font-mono text-xs uppercase tracking-widest transition-all cursor-pointer hover:border-cyan-400/30 disabled:opacity-40"
           >
             ↻ Refresh
           </button>
         </div>
 
-        {/* Loading */}
-        {loading && (
+        {/* Initial loading */}
+        {initialLoading && submissions.length === 0 && (
           <div className="glass-strong rounded-2xl p-12 text-center">
             <div className="w-8 h-8 mx-auto rounded-full border-2 border-cyan-400/40 border-t-cyan-400 animate-spin mb-4" />
             <p className="text-white/40 font-mono text-sm">Loading submissions...</p>
@@ -339,23 +420,30 @@ export default function AdminDashboard() {
         )}
 
         {/* Error */}
-        {error && !loading && (
+        {error && submissions.length === 0 && !initialLoading && (
           <div className="glass-strong rounded-2xl p-8 text-center border border-red-500/30">
             <p className="text-red-400 font-mono mb-2">Failed to load submissions</p>
             <p className="text-white/40 font-mono text-sm">{error}</p>
           </div>
         )}
 
+        {error && submissions.length > 0 && (
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-red-400/90 font-mono text-xs text-center">
+            Sync issue: {error}
+          </div>
+        )}
+
         {/* Empty */}
-        {!loading && !error && submissions.length === 0 && (
+        {!initialLoading && !error && submissions.length === 0 && (
           <div className="glass-strong rounded-2xl p-12 text-center">
             <div className="text-5xl mb-4">🫥</div>
             <p className="text-white/50 font-mono">No submissions yet. Waiting for the crew...</p>
+            <p className="text-white/25 font-mono text-xs mt-2">Auto-refreshing every few seconds</p>
           </div>
         )}
 
         {/* Submissions List */}
-        {!loading && !error && submissions.length > 0 && (
+        {submissions.length > 0 && (
           <div className="space-y-3">
             {submissions.map((sub) => {
               const isExpanded = expandedId === sub.id;
