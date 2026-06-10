@@ -87,6 +87,29 @@ function retroWordCount(text: string): number {
   return text.trim().split(/\s+/).filter((w) => w.length > 0).length;
 }
 
+function memeKeysFromUrls(urls: readonly (string | null | undefined)[]): Set<string> {
+  const keys = new Set<string>();
+  for (const url of urls) {
+    if (typeof url === "string" && url.length > 0) {
+      keys.add(canonicalMemeKey(url));
+    }
+  }
+  return keys;
+}
+
+function recentShowCountByMemeKey(
+  urls: readonly (string | null | undefined)[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const url of urls) {
+    if (typeof url === "string" && url.length > 0) {
+      const key = canonicalMemeKey(url);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
 function pickFromPoolAvoidingRecentKeys<T extends { url: string }>(
   clips: readonly T[],
   recentKeys: Set<string>,
@@ -101,8 +124,14 @@ function pickFromPoolAvoidingRecentKeys<T extends { url: string }>(
   return clips[Math.floor(Math.random() * clips.length)];
 }
 
-/** Do not suggest a meme whose URL appears in the last N saved submissions. */
-const RECENT_MEME_EXCLUSION_COUNT = 2;
+/** Do not suggest a meme whose URL appears in the last N global submissions. */
+const RECENT_MEME_EXCLUSION_COUNT = 6;
+/** Per-user: do not repeat any of this user's last N meme picks. */
+const USER_RECENT_MEME_EXCLUSION_COUNT = 4;
+/** How many recent submissions to scan for popularity decay (not a hard ban). */
+const POPULARITY_DECAY_WINDOW = 25;
+/** Score penalty per recent show in the decay window—nudges overused memes down, not out. */
+const POPULARITY_DECAY_PER_SHOW = 0.02;
 /** Ask RPC for enough rows to find a good alternative after exclusions. */
 const MEME_MATCH_CANDIDATE_POOL = 55;
 /** Self-rated 5/5 plus at least this richness nudges toward peak-swagger “ehh boy” tier (above cute-good band). */
@@ -237,22 +266,47 @@ export async function POST(request: NextRequest) {
 
   try {
     const supabase = getSupabase();
+    const trimmedUserName = userName.trim();
 
-    const { data: recentRows, error: recentError } = await supabase
-      .from("sprint_submissions")
-      .select("meme_url")
-      .order("created_at", { ascending: false })
-      .limit(RECENT_MEME_EXCLUSION_COUNT);
+    const [
+      { data: recentRows, error: recentError },
+      { data: userRecentRows, error: userRecentError },
+      { data: popularityRows, error: popularityError },
+    ] = await Promise.all([
+      supabase
+        .from("sprint_submissions")
+        .select("meme_url")
+        .order("created_at", { ascending: false })
+        .limit(RECENT_MEME_EXCLUSION_COUNT),
+      supabase
+        .from("sprint_submissions")
+        .select("meme_url")
+        .eq("user_name", trimmedUserName)
+        .order("created_at", { ascending: false })
+        .limit(USER_RECENT_MEME_EXCLUSION_COUNT),
+      supabase
+        .from("sprint_submissions")
+        .select("meme_url")
+        .order("created_at", { ascending: false })
+        .limit(POPULARITY_DECAY_WINDOW),
+    ]);
 
     if (recentError) {
       console.error("recent submissions fetch error:", recentError.message);
     }
+    if (userRecentError) {
+      console.error("user recent submissions fetch error:", userRecentError.message);
+    }
+    if (popularityError) {
+      console.error("popularity window fetch error:", popularityError.message);
+    }
 
-    const recentMemeKeys = new Set(
-      (recentRows ?? [])
-        .map((row) => row.meme_url)
-        .filter((url): url is string => typeof url === "string" && url.length > 0)
-        .map(canonicalMemeKey),
+    const recentMemeKeys = memeKeysFromUrls([
+      ...(recentRows ?? []).map((row) => row.meme_url),
+      ...(userRecentRows ?? []).map((row) => row.meme_url),
+    ]);
+    const recentShowCounts = recentShowCountByMemeKey(
+      (popularityRows ?? []).map((row) => row.meme_url),
     );
 
     // ── Step 1: Grade only (no aiComment—the clip is chosen first, then the line matches it) ─
@@ -411,15 +465,18 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
         }
       }
 
-      const ranked = [...memeResults].sort((a, b) => {
-        const brA = baseRatingById.get(a.id) ?? 3;
-        const brB = baseRatingById.get(b.id) ?? 3;
-        const alignA = 1 - Math.min(4, Math.abs(rating - brA)) / 4;
-        const alignB = 1 - Math.min(4, Math.abs(rating - brB)) / 4;
-        const scoreA = a.similarity + RATING_TIEBREAK_WEIGHT * alignA;
-        const scoreB = b.similarity + RATING_TIEBREAK_WEIGHT * alignB;
-        return scoreB - scoreA;
-      });
+      const memeMatchScore = (meme: MemeMatch): number => {
+        const br = baseRatingById.get(meme.id) ?? 3;
+        const align = 1 - Math.min(4, Math.abs(rating - br)) / 4;
+        const popularityPenalty =
+          POPULARITY_DECAY_PER_SHOW *
+          (recentShowCounts.get(canonicalMemeKey(meme.video_url)) ?? 0);
+        return meme.similarity + RATING_TIEBREAK_WEIGHT * align - popularityPenalty;
+      };
+
+      const ranked = [...memeResults].sort(
+        (a, b) => memeMatchScore(b) - memeMatchScore(a),
+      );
 
       const bestMeme =
         ranked.find((m) => !recentMemeKeys.has(canonicalMemeKey(m.video_url))) ?? ranked[0];
