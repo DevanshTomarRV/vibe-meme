@@ -138,6 +138,8 @@ const MEME_MATCH_CANDIDATE_POOL = 55;
 const LEGENDARY_RATING_MEME_MIN_RICHNESS = 60;
 /** With rating 4–5 and richness at least this (and not in the legendary tier above), nudge toward wholesome “cute / all good” memes. */
 const CUTE_GOOD_VIBES_MIN_RICHNESS = 40;
+/** Only this clip gets the optional poster-child Brainrot bouncer bit (not every chronically-online retro). */
+const POSTER_CHILD_BRAINROT_MEME_KEY = "yt:tzD9OxAHtzU";
 
 interface BouncerFlagSnapshot {
   nonsenseSlop: boolean;
@@ -152,10 +154,13 @@ async function generateAiCommentForMeme(
     explanation: string;
     memeTitle: string;
     memeVibe: string;
+    memeUrl: string;
     flags: BouncerFlagSnapshot;
   },
 ): Promise<string> {
   const { rating, explanation, memeTitle, memeVibe, flags } = params;
+  const isPosterChildBrainrotClip =
+    canonicalMemeKey(params.memeUrl) === POSTER_CHILD_BRAINROT_MEME_KEY;
   const extras: string[] = [];
   if (flags.nonsenseSlop) {
     extras.push(
@@ -167,9 +172,14 @@ async function generateAiCommentForMeme(
       "They were flagged for poor English—you MUST ask them to improve spelling and grammar before the next retro; direct but not cruel.",
     );
   }
-  if (flags.extremeBrainrot) {
+  if (flags.extremeBrainrot && !isPosterChildBrainrotClip) {
     extras.push(
-      "Their write-up flagged chronically-online brainrot: aiComment MUST include this exact sentence somewhere: you are the poster child of 'Brainrot'. (verbatim, including single quotes around Brainrot).",
+      "Their write-up has chronically-online meme energy—roast in this clip's voice with varied slang; don't reach for brainrot as a default insult.",
+    );
+  }
+  if (isPosterChildBrainrotClip) {
+    extras.push(
+      "This clip is the poster-child Brainrot Short—you may naturally work in 'you are the poster child of Brainrot' once if it fits the roast; skip it if a different punchline lands better. Don't stack brainrot on top of that.",
     );
   }
 
@@ -185,6 +195,7 @@ ${memeVibe}
 ${extras.length > 0 ? `Additional rules:\n${extras.join("\n")}\n` : ""}
 General rules:
 - One or two short sentences in JSON field aiComment only.
+- Vary your roasts—brainrot and catchphrase insults are occasional flavor, not your go-to every time unless this clip clearly calls for it.
 - If the clip vibe is angry matriarch soap rage, be loud and theatrical (still comedic safe—no credible threat of real violence). If the vibe is playful teasing, stay light and mischievous—not the angry matriarch voice.
 - Do not name Mamata Banerjee or other specific politician rally memes unless the clip title/vibe above already implies that genre.
 
@@ -317,7 +328,7 @@ Set nonsenseSlop to true if the explanation is not coherent natural language at 
 
 Set poorEnglish to true only if nonsenseSlop is false AND the explanation is hard to follow as English prose: many repeated spelling errors, mangled tense or word order throughout, or sentence fragments stacked so the reader has to guess the intent. Do NOT set poorEnglish for: a few typos, casual or chatty tone, light slang, non-native phrasing that is still clear, bullet fragments, or informal register. When in doubt, prefer false.
 
-Set extremeBrainrot to true if nonsenseSlop is false AND poorEnglish is false AND the write-up is peak internet brainrot: meme-caption dialect, chronically online nonsense, TikTok-for-brains sprint recap, algorithm-sludge hype, or unserious stacked references where it still resembles language but is cultural sludge—not random keyboard gibberish (that is nonsenseSlop) and not mainly grammar mistakes (that is poorEnglish). Otherwise extremeBrainrot is false.
+Set extremeBrainrot to true if nonsenseSlop is false AND poorEnglish is false AND the write-up is distinctly chronically-online meme dialect: meme-caption logic, stacked absurd references, TikTok-style hype, or unserious internet recap sludge—not casual chat, a lone slang word, or a ultra-short lazy answer. Not keyboard gibberish (nonsenseSlop) and not mainly grammar issues (poorEnglish).
 
 Return a JSON object with exactly these keys: { "richnessScore": number, "nonsenseSlop": boolean, "poorEnglish": boolean, "extremeBrainrot": boolean }
 
@@ -407,9 +418,7 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
       const trimmedExplanation = explanation.trim();
       let explanationForMemeEmbedding = trimmedExplanation;
 
-      if (extremeBrainrot) {
-        explanationForMemeEmbedding += `\n\n(Grading context: chronically online brainrot sprint recap—meme dialect, poster child of Brainrot energy, TikTok-caption brain, algorithm-sludge hype. Match to viral brainrot Short clips by semantic fit.)`;
-      } else if (
+      if (
         rating === 5 &&
         graded.richnessScore >= LEGENDARY_RATING_MEME_MIN_RICHNESS
       ) {
@@ -502,6 +511,7 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
         explanation: explanation.trim(),
         memeTitle,
         memeVibe,
+        memeUrl,
         flags,
       });
     } catch (e) {
