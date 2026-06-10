@@ -384,6 +384,46 @@ const MEMES: MemeEntry[] = [
       "Viral Short brainrot energy for sprint retros that read like chronically online sludge: meme dialect, TikTok-caption logic, stacked absurdity that still feels like English but is culturally fried. The bouncer calls them the poster child of 'Brainrot'—peak algorithm-for-brains recap, unserious hype, main-character internet. Match when the recap is that poster-child Brainrot voice; other rally or brainrot memes are separate semantic neighbors.",
     rlhf_score: 0,
   },
+  {
+    id: "joshiraku_nippon_egao_01",
+    title: "Joshiraku — Nippon Egao Hyakkei (Ending Theme)",
+    base_rating: 4,
+    video_url: "https://www.youtube.com/embed/-8F9xVRNHoU?autoplay=1&mute=0",
+    cultural_tags: ["Japan", "Anime", "Joshiraku", "Wholesome"],
+    semantic_context:
+      "Joshiraku Nippon Egao Hyakkei ending energy: cheerful anime dance, hundred-smiles Japan, everyone beaming and moving in sync—pure collective joy. Use when the vibes are good and team spirit is high: the user rated the sprint 4 or 5 and the write-up radiates squad energy—morale up, teammates clicking, wins shared, gratitude for the crew, standup felt light, shipping together was fun, office sunny. Wholesome group hype, not lone-wolf flex—the whole team is smiling, camaraderie, we're in this together, infectious positive retro that makes you want to clap along.",
+    rlhf_score: 0,
+  },
+  {
+    id: "lulli_luli_mafia_aura_01",
+    title: "Lulli luli — Russian mafia aura farming (Short)",
+    base_rating: 5,
+    video_url: "https://www.youtube.com/embed/aTBavnPx1oo?autoplay=1&mute=0",
+    cultural_tags: ["Russia", "Viral", "Shorts", "Aura"],
+    semantic_context:
+      "Lulli luli viral Short energy: Russian mafia aura farming—peak swagger, cold boss walk, intimidating cool, dark main-character presence like you own the block. Use when someone self-rates the sprint 4 or 5 and the write-up radiates unhinged confidence, villain-arc energy, maximum aura harvest—flex so hard it feels cinematic, gangster-movie strut, everyone else is an NPC, they shipped like a don and know it. Peak energy brag that is funny-dramatic not wholesome; earned god-tier week with mafia-boss gravitas, locker-room king energy, walking into retro like the soundtrack already started.",
+    rlhf_score: 0,
+  },
+  {
+    id: "under_the_water_01",
+    title: "Hello, how are you? I am under the water",
+    base_rating: 2,
+    video_url: "https://www.youtube.com/embed/Bu8bH2P37kY?autoplay=1&mute=0",
+    cultural_tags: ["Global", "Internet Classic", "Viral", "Distorted"],
+    semantic_context:
+      "Distorted 'Hello, how are you? I am under the water' meme energy: drowning in chaos, barely keeping head above the workload, panicked overwhelm with comedic distortion. Use when the user rated the sprint 1 or 2 and the write-up sounds like they are suffocating—too many tickets, incident pile-on, on-call hell, sprint scope tsunami, meetings underwater, can't breathe, please send help but still reporting in. Stressed-survival mode not graceful burnout; chaotic distress, everything is wet and wrong, drowning while pretending to be fine on Slack.",
+    rlhf_score: 0,
+  },
+  {
+    id: "come_monday_01",
+    title: "Come Monday come Monday (meme)",
+    base_rating: 2,
+    video_url: "https://www.youtube.com/embed/4UUrXaMaVNs?autoplay=1&mute=0",
+    cultural_tags: ["Global", "Viral", "Shorts", "Work"],
+    semantic_context:
+      "Come Monday come Monday meme energy: raging refusal to work—loud don't-wanna energy, need a break NOW, furious countdown to time off, workweek dread turned up to eleven. Use when the user rated the sprint 1, 2, or 3 and the write-up screams checked out: can't do another ticket, vacation please, sprint was a grind they want to escape, angry hangover from meetings, raging against the calendar, need PTO not pep talks. Not sad burnout—combative exhaustion, fighting the workweek, dramatic 'let me rest' tantrum energy.",
+    rlhf_score: 0,
+  },
 ];
 
 // ── Environment validation ────────────────────────────────────────────────────

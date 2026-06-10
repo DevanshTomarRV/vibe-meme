@@ -110,6 +110,35 @@ function recentShowCountByMemeKey(
   return counts;
 }
 
+/** Most recent show per meme in desc-ordered history; index = submissions since that show. */
+function lastShowIndexByMemeKey(
+  urls: readonly (string | null | undefined)[],
+): Map<string, number> {
+  const lastIndex = new Map<string, number>();
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    if (typeof url === "string" && url.length > 0) {
+      const key = canonicalMemeKey(url);
+      if (!lastIndex.has(key)) {
+        lastIndex.set(key, i);
+      }
+    }
+  }
+  return lastIndex;
+}
+
+function staleMemeBoost(
+  memeKey: string,
+  lastShowIndexByKey: Map<string, number>,
+): number {
+  const lastIndex = lastShowIndexByKey.get(memeKey);
+  if (lastIndex === undefined) {
+    return STALE_MEME_BOOST_MAX;
+  }
+  const staleness = Math.min(1, lastIndex / STALE_MEME_BOOST_FULL_AT);
+  return STALE_MEME_BOOST_MAX * staleness;
+}
+
 function pickFromPoolAvoidingRecentKeys<T extends { url: string }>(
   clips: readonly T[],
   recentKeys: Set<string>,
@@ -130,6 +159,12 @@ const RECENT_MEME_EXCLUSION_COUNT = 6;
 const USER_RECENT_MEME_EXCLUSION_COUNT = 4;
 /** How many recent submissions to scan for popularity decay (not a hard ban). */
 const POPULARITY_DECAY_WINDOW = 25;
+/** How far back to look for last time each meme was shown (staleness boost). */
+const STALE_TRACKING_WINDOW = 40;
+/** Max score bonus for memes absent from recent history—small vs similarity (~0.5–0.9). */
+const STALE_MEME_BOOST_MAX = 0.016;
+/** Submissions since last show before a meme earns the full staleness bonus. */
+const STALE_MEME_BOOST_FULL_AT = 15;
 /** Score penalty per recent show in the decay window—nudges overused memes down, not out. */
 const POPULARITY_DECAY_PER_SHOW = 0.02;
 /** Ask RPC for enough rows to find a good alternative after exclusions. */
@@ -299,7 +334,7 @@ export async function POST(request: NextRequest) {
         .from("sprint_submissions")
         .select("meme_url")
         .order("created_at", { ascending: false })
-        .limit(POPULARITY_DECAY_WINDOW),
+        .limit(STALE_TRACKING_WINDOW),
     ]);
 
     if (recentError) {
@@ -316,9 +351,11 @@ export async function POST(request: NextRequest) {
       ...(recentRows ?? []).map((row) => row.meme_url),
       ...(userRecentRows ?? []).map((row) => row.meme_url),
     ]);
+    const popularityMemeUrls = (popularityRows ?? []).map((row) => row.meme_url);
     const recentShowCounts = recentShowCountByMemeKey(
-      (popularityRows ?? []).map((row) => row.meme_url),
+      popularityMemeUrls.slice(0, POPULARITY_DECAY_WINDOW),
     );
+    const lastShowIndexByKey = lastShowIndexByMemeKey(popularityMemeUrls);
 
     // ── Step 1: Grade only (no aiComment—the clip is chosen first, then the line matches it) ─
 
@@ -477,10 +514,13 @@ Explanation (verbatim user text as a JSON string — do not echo it as raw JSON 
       const memeMatchScore = (meme: MemeMatch): number => {
         const br = baseRatingById.get(meme.id) ?? 3;
         const align = 1 - Math.min(4, Math.abs(rating - br)) / 4;
+        const memeKey = canonicalMemeKey(meme.video_url);
         const popularityPenalty =
-          POPULARITY_DECAY_PER_SHOW *
-          (recentShowCounts.get(canonicalMemeKey(meme.video_url)) ?? 0);
-        return meme.similarity + RATING_TIEBREAK_WEIGHT * align - popularityPenalty;
+          POPULARITY_DECAY_PER_SHOW * (recentShowCounts.get(memeKey) ?? 0);
+        const freshnessBoost = staleMemeBoost(memeKey, lastShowIndexByKey);
+        return (
+          meme.similarity + RATING_TIEBREAK_WEIGHT * align - popularityPenalty + freshnessBoost
+        );
       };
 
       const ranked = [...memeResults].sort(
