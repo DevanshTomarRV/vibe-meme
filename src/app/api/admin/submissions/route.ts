@@ -57,7 +57,8 @@ export async function GET(request: NextRequest) {
     let subQuery = supabase
       .from("sprint_submissions")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(5000);
 
     if (since) {
       subQuery = subQuery.gt("created_at", since);

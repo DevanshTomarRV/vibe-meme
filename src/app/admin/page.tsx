@@ -82,6 +82,17 @@ function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submi
   );
 }
 
+function newestCreatedAt(rows: Submission[]): string {
+  let maxMs = 0;
+  for (const row of rows) {
+    const ms = new Date(row.created_at).getTime();
+    if (ms > maxMs) {
+      maxMs = ms;
+    }
+  }
+  return new Date(maxMs).toISOString();
+}
+
 type FetchMode = "initial" | "full" | "incremental";
 
 export default function AdminDashboard() {
@@ -110,45 +121,41 @@ export default function AdminDashboard() {
     }
 
     try {
-      let url = "/api/admin/submissions";
+      const params = new URLSearchParams();
       if (isIncremental && submissionsRef.current.length > 0) {
-        const newest = submissionsRef.current.reduce(
-          (max, s) => (s.created_at > max ? s.created_at : max),
-          submissionsRef.current[0].created_at,
-        );
-        url += `?since=${encodeURIComponent(newest)}`;
+        params.set("since", newestCreatedAt(submissionsRef.current));
       }
+      // Bust any intermediary/browser cache on full sync.
+      params.set("_", String(Date.now()));
 
-      const res = await fetch(url, { method: "GET" });
+      const res = await fetch(`/api/admin/submissions?${params}`, {
+        method: "GET",
+        cache: "no-store",
+      });
       const payload: { submissions?: Submission[]; error?: string } = await res.json();
 
       if (!res.ok) {
-        if (!isIncremental) {
-          setError(payload.error || `Request failed (${res.status})`);
-          if (isInitial) {
-            setSubmissions([]);
-          }
+        setError(payload.error || `Request failed (${res.status})`);
+        if (isInitial) {
+          setSubmissions([]);
         }
         return;
       }
 
       const rows = payload.submissions ?? [];
 
-      if (isIncremental && submissionsRef.current.length > 0) {
-        if (rows.length > 0) {
-          setSubmissions((prev) => mergeSubmissions(prev, rows));
-        }
-      } else {
+      if (isInitial) {
         setSubmissions(rows);
-        setError(null);
+      } else if (rows.length > 0) {
+        // Merge on poll so a stale full-sync response cannot wipe newer incremental rows.
+        setSubmissions((prev) => mergeSubmissions(prev, rows));
       }
+      setError(null);
     } catch (e) {
-      if (!isIncremental) {
-        const message = e instanceof Error ? e.message : "Network error";
-        setError(message);
-        if (isInitial) {
-          setSubmissions([]);
-        }
+      const message = e instanceof Error ? e.message : "Network error";
+      setError(message);
+      if (isInitial) {
+        setSubmissions([]);
       }
     } finally {
       if (isInitial) {
@@ -173,7 +180,17 @@ export default function AdminDashboard() {
       }
     }, POLL_INTERVAL_MS);
 
-    return () => clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchSubmissions("full");
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchSubmissions]);
 
   const toggleExpand = (id: string) => {
