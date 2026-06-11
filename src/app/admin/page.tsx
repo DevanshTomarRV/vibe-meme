@@ -138,11 +138,14 @@ export default function AdminDashboard() {
         typeof payload.total === "number" ? payload.total : rows.length;
       setServerTotal(total);
 
-      const merged = mergeSubmissions(submissionsRef.current, rows);
-      setSubmissions(merged);
+      const complete = rows.length >= total;
+      const next = complete
+        ? rows
+        : mergeSubmissions(submissionsRef.current, rows);
+      setSubmissions(next);
       setError(null);
 
-      if (merged.length < total) {
+      if (next.length < total) {
         window.setTimeout(() => {
           void fetchSubmissions("poll");
         }, 600);

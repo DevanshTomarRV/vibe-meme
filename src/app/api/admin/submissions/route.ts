@@ -3,6 +3,51 @@ import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 200;
+
+type SubmissionRow = Record<string, unknown> & { id: string; created_at: string };
+
+async function fetchAllSubmissions(
+  supabase: ReturnType<typeof getSupabase>,
+): Promise<{ rows: SubmissionRow[]; total: number }> {
+  const all: SubmissionRow[] = [];
+  let total = 0;
+  let from = 0;
+
+  while (true) {
+    const { data, error, count } = await supabase
+      .from("sprint_submissions")
+      .select("*", { count: from === 0 ? "exact" : undefined })
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    if (from === 0 && typeof count === "number") {
+      total = count;
+    }
+
+    const page = (data ?? []) as SubmissionRow[];
+    if (page.length === 0) {
+      break;
+    }
+
+    all.push(...page);
+    from += page.length;
+
+    if (page.length < PAGE_SIZE) {
+      break;
+    }
+    if (total > 0 && all.length >= total) {
+      break;
+    }
+  }
+
+  return { rows: all, total: Math.max(total, all.length) };
+}
+
 async function fetchFeedbackForIds(
   supabase: ReturnType<typeof getSupabase>,
   ids: string[],
@@ -51,30 +96,21 @@ export async function GET() {
   try {
     const supabase = getSupabase();
 
-    const [{ count: total, error: countErr }, { data: rows, error: subErr }] =
-      await Promise.all([
-        supabase
-          .from("sprint_submissions")
-          .select("*", { count: "exact", head: true }),
-        supabase
-          .from("sprint_submissions")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(5000),
-      ]);
-
-    if (countErr) {
-      console.error("admin submissions count:", countErr.message);
-    }
-    if (subErr) {
-      console.error("admin submissions fetch:", subErr.message);
+    let rows: SubmissionRow[];
+    let total: number;
+    try {
+      ({ rows, total } = await fetchAllSubmissions(supabase));
+    } catch (subErr) {
+      const message =
+        subErr instanceof Error ? subErr.message : "Failed to load submissions";
+      console.error("admin submissions fetch:", message);
       return NextResponse.json(
-        { error: subErr.message, submissions: [], total: total ?? 0 },
+        { error: message, submissions: [], total: 0 },
         { status: 502 },
       );
     }
 
-    const submissions = rows ?? [];
+    const submissions = rows;
     const ids = submissions.map((s: { id: string }) => s.id).filter(Boolean);
     const feedbackBySubmission = await fetchFeedbackForIds(supabase, ids);
 
