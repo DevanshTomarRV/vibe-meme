@@ -3,23 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
 import { getSupabaseBrowser } from "@/lib/supabaseBrowser";
+import {
+  fetchAdminSubmissions,
+  type AdminSubmission,
+} from "@/lib/adminSubmissions";
 
-interface MemeFeedbackRow {
-  relatable: boolean;
-  relatable_how: string | null;
-}
-
-interface Submission {
-  id: string;
-  user_name: string;
-  rating: number;
-  explanation: string;
-  richness_score: number;
-  ai_comment: string;
-  meme_url: string;
-  created_at: string;
-  meme_feedback: MemeFeedbackRow[] | null;
-}
+type Submission = AdminSubmission;
 
 interface MemeForm {
   id: string;
@@ -70,35 +59,20 @@ function getScoreGlow(score: number): string {
 }
 
 const POLL_INTERVAL_MS = 3000;
-const POLL_CATCHUP_MS = 800;
-
-function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submission[] {
-  const byId = new Map(existing.map((s) => [s.id, s]));
-  for (const row of incoming) {
-    byId.set(row.id, row);
-  }
-  return Array.from(byId.values()).sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
-}
 
 type FetchMode = "initial" | "poll";
 
 export default function AdminDashboard() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const submissionsRef = useRef<Submission[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [serverTotal, setServerTotal] = useState<number | null>(null);
   const fetchGenerationRef = useRef(0);
 
   const [memeForm, setMemeForm] = useState<MemeForm>(EMPTY_MEME_FORM);
   const [cmsLoading, setCmsLoading] = useState(false);
   const [cmsMessage, setCmsMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  submissionsRef.current = submissions;
 
   const fetchSubmissions = useCallback(async (mode: FetchMode = "poll") => {
     const isInitial = mode === "initial";
@@ -112,43 +86,23 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch(`/api/admin/submissions?_=${Date.now()}`, {
-        method: "GET",
-        cache: "no-store",
-        headers: { Pragma: "no-cache" },
-      });
-      const payload: {
-        submissions?: Submission[];
-        total?: number;
-        error?: string;
-      } = await res.json();
+      const { submissions: rows, error: fetchError } =
+        await fetchAdminSubmissions();
 
       if (generation !== fetchGenerationRef.current) {
         return;
       }
 
-      if (!res.ok) {
-        setError(payload.error || `Request failed (${res.status})`);
+      if (fetchError) {
+        setError(fetchError);
         if (isInitial) {
           setSubmissions([]);
         }
         return;
       }
 
-      const rows = payload.submissions ?? [];
-      const total =
-        typeof payload.total === "number" ? payload.total : rows.length;
-      setServerTotal(total);
-
-      const next = mergeSubmissions(submissionsRef.current, rows);
-      setSubmissions(next);
+      setSubmissions(rows);
       setError(null);
-
-      if (next.length < total) {
-        window.setTimeout(() => {
-          void fetchSubmissions("poll");
-        }, POLL_CATCHUP_MS);
-      }
     } catch (e) {
       if (generation !== fetchGenerationRef.current) {
         return;
@@ -421,11 +375,7 @@ export default function AdminDashboard() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3 font-mono text-sm">
             <p className="text-white/40">
-              {submissions.length}
-              {serverTotal !== null && serverTotal !== submissions.length
-                ? ` / ${serverTotal}`
-                : ""}{" "}
-              submission{submissions.length !== 1 ? "s" : ""}
+              {submissions.length} submission{submissions.length !== 1 ? "s" : ""}
             </p>
             <span className="flex items-center gap-1.5 text-green-400/70 text-xs uppercase tracking-widest">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
