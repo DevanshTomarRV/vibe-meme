@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +47,7 @@ async function fetchFeedbackForIds(
  * Returns the full submission list plus `total` (DB row count) so the client can
  * detect incomplete/cached responses and retry.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const supabase = getSupabase();
 
