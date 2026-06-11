@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { normalizeYouTubePlaybackUrl } from "@/lib/youtubeEmbed";
+import { getSupabaseBrowser } from "@/lib/supabaseBrowser";
 
 interface MemeFeedbackRow {
   relatable: boolean;
@@ -68,7 +69,8 @@ function getScoreGlow(score: number): string {
   return "drop-shadow-[0_0_10px_rgba(248,113,113,0.5)]";
 }
 
-const POLL_INTERVAL_MS = 4000;
+const POLL_INTERVAL_MS = 3000;
+const POLL_CATCHUP_MS = 800;
 
 function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submission[] {
   const byId = new Map(existing.map((s) => [s.id, s]));
@@ -138,17 +140,14 @@ export default function AdminDashboard() {
         typeof payload.total === "number" ? payload.total : rows.length;
       setServerTotal(total);
 
-      const complete = rows.length >= total;
-      const next = complete
-        ? rows
-        : mergeSubmissions(submissionsRef.current, rows);
+      const next = mergeSubmissions(submissionsRef.current, rows);
       setSubmissions(next);
       setError(null);
 
       if (next.length < total) {
         window.setTimeout(() => {
           void fetchSubmissions("poll");
-        }, 600);
+        }, POLL_CATCHUP_MS);
       }
     } catch (e) {
       if (generation !== fetchGenerationRef.current) {
@@ -185,9 +184,24 @@ export default function AdminDashboard() {
     };
     document.addEventListener("visibilitychange", onVisible);
 
+    const supabase = getSupabaseBrowser();
+    const channel = supabase
+      ?.channel("admin-sprint-submissions")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "sprint_submissions" },
+        () => {
+          void fetchSubmissions("poll");
+        },
+      )
+      .subscribe();
+
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
+      if (supabase && channel) {
+        void supabase.removeChannel(channel);
+      }
     };
   }, [fetchSubmissions]);
 

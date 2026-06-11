@@ -4,20 +4,40 @@ import { getSupabase } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 200;
+/** Re-fetch the newest slice after pagination — catches rows inserted mid-request. */
+const HEAD_LIMIT = 40;
 
 type SubmissionRow = Record<string, unknown> & { id: string; created_at: string };
+
+function sortByNewest(rows: SubmissionRow[]): SubmissionRow[] {
+  return [...rows].sort(
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+}
+
+function mergeRowsById(
+  ...groups: SubmissionRow[][]
+): SubmissionRow[] {
+  const byId = new Map<string, SubmissionRow>();
+  for (const group of groups) {
+    for (const row of group) {
+      byId.set(row.id, row);
+    }
+  }
+  return sortByNewest(Array.from(byId.values()));
+}
 
 async function fetchAllSubmissions(
   supabase: ReturnType<typeof getSupabase>,
 ): Promise<{ rows: SubmissionRow[]; total: number }> {
-  const all: SubmissionRow[] = [];
-  let total = 0;
+  const paged: SubmissionRow[] = [];
   let from = 0;
 
   while (true) {
-    const { data, error, count } = await supabase
+    const { data, error } = await supabase
       .from("sprint_submissions")
-      .select("*", { count: from === 0 ? "exact" : undefined })
+      .select("*")
       .order("created_at", { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
 
@@ -25,27 +45,40 @@ async function fetchAllSubmissions(
       throw error;
     }
 
-    if (from === 0 && typeof count === "number") {
-      total = count;
-    }
-
     const page = (data ?? []) as SubmissionRow[];
     if (page.length === 0) {
       break;
     }
 
-    all.push(...page);
+    paged.push(...page);
     from += page.length;
 
     if (page.length < PAGE_SIZE) {
       break;
     }
-    if (total > 0 && all.length >= total) {
-      break;
-    }
   }
 
-  return { rows: all, total: Math.max(total, all.length) };
+  const { data: head, error: headErr } = await supabase
+    .from("sprint_submissions")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(HEAD_LIMIT);
+
+  if (headErr) {
+    throw headErr;
+  }
+
+  const rows = mergeRowsById(paged, (head ?? []) as SubmissionRow[]);
+
+  const { count, error: countErr } = await supabase
+    .from("sprint_submissions")
+    .select("*", { count: "exact", head: true });
+
+  if (countErr) {
+    throw countErr;
+  }
+
+  return { rows, total: count ?? rows.length };
 }
 
 async function fetchFeedbackForIds(
