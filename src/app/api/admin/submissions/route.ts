@@ -44,32 +44,32 @@ async function fetchFeedbackForIds(
  * Runs on the server (same env path as /api/evaluate-vibe) so Vercel does not depend
  * on NEXT_PUBLIC_* being inlined into the browser bundle.
  *
- * Query params:
- *   since — ISO timestamp; return only rows newer than this (for live polling).
+ * Returns the full submission list plus `total` (DB row count) so the client can
+ * detect incomplete/cached responses and retry.
  */
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabase();
-    const since = request.nextUrl.searchParams.get("since");
 
-    // Two queries: PostgREST nested `meme_feedback(...)` requires an FK in the schema
-    // cache; some projects lack it or use a different layout, which breaks embeds.
-    let subQuery = supabase
-      .from("sprint_submissions")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(5000);
+    const [{ count: total, error: countErr }, { data: rows, error: subErr }] =
+      await Promise.all([
+        supabase
+          .from("sprint_submissions")
+          .select("*", { count: "exact", head: true }),
+        supabase
+          .from("sprint_submissions")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(5000),
+      ]);
 
-    if (since) {
-      subQuery = subQuery.gt("created_at", since);
+    if (countErr) {
+      console.error("admin submissions count:", countErr.message);
     }
-
-    const { data: rows, error: subErr } = await subQuery;
-
     if (subErr) {
       console.error("admin submissions fetch:", subErr.message);
       return NextResponse.json(
-        { error: subErr.message, submissions: [] },
+        { error: subErr.message, submissions: [], total: total ?? 0 },
         { status: 502 },
       );
     }
@@ -84,10 +84,13 @@ export async function GET(request: NextRequest) {
     }));
 
     return NextResponse.json(
-      { submissions: merged },
+      { submissions: merged, total: total ?? merged.length },
       {
         headers: {
-          "Cache-Control": "private, no-store, max-age=0",
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+          "CDN-Cache-Control": "no-store",
+          Pragma: "no-cache",
         },
       },
     );

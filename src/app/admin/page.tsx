@@ -69,8 +69,6 @@ function getScoreGlow(score: number): string {
 }
 
 const POLL_INTERVAL_MS = 4000;
-/** Full sync picks up meme_feedback on older rows. */
-const FULL_SYNC_EVERY_N_POLLS = 8;
 
 function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submission[] {
   const byId = new Map(existing.map((s) => [s.id, s]));
@@ -82,18 +80,7 @@ function mergeSubmissions(existing: Submission[], incoming: Submission[]): Submi
   );
 }
 
-function newestCreatedAt(rows: Submission[]): string {
-  let maxMs = 0;
-  for (const row of rows) {
-    const ms = new Date(row.created_at).getTime();
-    if (ms > maxMs) {
-      maxMs = ms;
-    }
-  }
-  return new Date(maxMs).toISOString();
-}
-
-type FetchMode = "initial" | "full" | "incremental";
+type FetchMode = "initial" | "poll";
 
 export default function AdminDashboard() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -102,6 +89,8 @@ export default function AdminDashboard() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
+  const fetchGenerationRef = useRef(0);
 
   const [memeForm, setMemeForm] = useState<MemeForm>(EMPTY_MEME_FORM);
   const [cmsLoading, setCmsLoading] = useState(false);
@@ -109,9 +98,9 @@ export default function AdminDashboard() {
 
   submissionsRef.current = submissions;
 
-  const fetchSubmissions = useCallback(async (mode: FetchMode = "full") => {
+  const fetchSubmissions = useCallback(async (mode: FetchMode = "poll") => {
     const isInitial = mode === "initial";
-    const isIncremental = mode === "incremental";
+    const generation = ++fetchGenerationRef.current;
 
     if (isInitial) {
       setInitialLoading(true);
@@ -121,18 +110,20 @@ export default function AdminDashboard() {
     }
 
     try {
-      const params = new URLSearchParams();
-      if (isIncremental && submissionsRef.current.length > 0) {
-        params.set("since", newestCreatedAt(submissionsRef.current));
-      }
-      // Bust any intermediary/browser cache on full sync.
-      params.set("_", String(Date.now()));
-
-      const res = await fetch(`/api/admin/submissions?${params}`, {
+      const res = await fetch(`/api/admin/submissions?_=${Date.now()}`, {
         method: "GET",
         cache: "no-store",
+        headers: { Pragma: "no-cache" },
       });
-      const payload: { submissions?: Submission[]; error?: string } = await res.json();
+      const payload: {
+        submissions?: Submission[];
+        total?: number;
+        error?: string;
+      } = await res.json();
+
+      if (generation !== fetchGenerationRef.current) {
+        return;
+      }
 
       if (!res.ok) {
         setError(payload.error || `Request failed (${res.status})`);
@@ -143,25 +134,35 @@ export default function AdminDashboard() {
       }
 
       const rows = payload.submissions ?? [];
+      const total =
+        typeof payload.total === "number" ? payload.total : rows.length;
+      setServerTotal(total);
 
-      if (isInitial) {
-        setSubmissions(rows);
-      } else if (rows.length > 0) {
-        // Merge on poll so a stale full-sync response cannot wipe newer incremental rows.
-        setSubmissions((prev) => mergeSubmissions(prev, rows));
-      }
+      const merged = mergeSubmissions(submissionsRef.current, rows);
+      setSubmissions(merged);
       setError(null);
+
+      if (merged.length < total) {
+        window.setTimeout(() => {
+          void fetchSubmissions("poll");
+        }, 600);
+      }
     } catch (e) {
+      if (generation !== fetchGenerationRef.current) {
+        return;
+      }
       const message = e instanceof Error ? e.message : "Network error";
       setError(message);
       if (isInitial) {
         setSubmissions([]);
       }
     } finally {
-      if (isInitial) {
-        setInitialLoading(false);
+      if (generation === fetchGenerationRef.current) {
+        if (isInitial) {
+          setInitialLoading(false);
+        }
+        setRefreshing(false);
       }
-      setRefreshing(false);
     }
   }, []);
 
@@ -170,19 +171,13 @@ export default function AdminDashboard() {
   }, [fetchSubmissions]);
 
   useEffect(() => {
-    let pollCount = 0;
     const timer = setInterval(() => {
-      pollCount += 1;
-      if (pollCount % FULL_SYNC_EVERY_N_POLLS === 0) {
-        fetchSubmissions("full");
-      } else {
-        fetchSubmissions("incremental");
-      }
+      void fetchSubmissions("poll");
     }, POLL_INTERVAL_MS);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        fetchSubmissions("full");
+        void fetchSubmissions("poll");
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -409,7 +404,11 @@ export default function AdminDashboard() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3 font-mono text-sm">
             <p className="text-white/40">
-              {submissions.length} submission{submissions.length !== 1 ? "s" : ""}
+              {submissions.length}
+              {serverTotal !== null && serverTotal !== submissions.length
+                ? ` / ${serverTotal}`
+                : ""}{" "}
+              submission{submissions.length !== 1 ? "s" : ""}
             </p>
             <span className="flex items-center gap-1.5 text-green-400/70 text-xs uppercase tracking-widest">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
@@ -420,7 +419,7 @@ export default function AdminDashboard() {
             )}
           </div>
           <button
-            onClick={() => fetchSubmissions("full")}
+            onClick={() => fetchSubmissions("poll")}
             disabled={refreshing}
             className="px-4 py-2 rounded-lg glass text-white/60 hover:text-white/90 font-mono text-xs uppercase tracking-widest transition-all cursor-pointer hover:border-cyan-400/30 disabled:opacity-40"
           >
